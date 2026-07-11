@@ -70,7 +70,7 @@ function M.open(lang_key, opts)
 
     -- Async preview: fetch definition from dict.org
     preview = function(ctx)
-      update_preview(ctx.preview.buf, ctx.item.word, lex.current_source(lang_key))
+      update_preview(ctx.buf, ctx.item.word, lex.current_source(lang_key))
     end,
 
     -- <CR>: insert selected word at cursor
@@ -88,7 +88,7 @@ function M.open(lang_key, opts)
         local item = picker.list:current()
         vim.notify(("lexicon source → %s"):format(src), vim.log.levels.INFO)
         if item and picker.preview then
-          update_preview(picker.preview.buf, item.word, src)
+          update_preview(vim.api.nvim_win_get_buf(picker.preview.win), item.word, src)
         end
       end,
     },
