@@ -9,17 +9,21 @@ local function cat_cmd(path)
 end
 
 -- Populate preview buffer with an async dict.org lookup
+local function buf_set_lines(bufnr, lines)
+  if not vim.api.nvim_buf_is_valid(bufnr) then return end
+  vim.bo[bufnr].modifiable = true
+  vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, lines)
+  vim.bo[bufnr].modifiable = false
+end
+
 local function update_preview(bufnr, word, src)
-  vim.api.nvim_buf_set_lines(bufnr, 0, -1, false,
-    { ("[%s]  fetching %q …"):format(src, word) })
+  buf_set_lines(bufnr, { ("[%s]  fetching %q …"):format(src, word) })
 
   lex.fetch(word, src, function(lines)
     if #lines == 0 then lines = { "no definition found: " .. word } end
     lines[#lines + 1] = ""
     lines[#lines + 1] = ("── %s ──"):format(src)
-    if vim.api.nvim_buf_is_valid(bufnr) then
-      vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, lines)
-    end
+    buf_set_lines(bufnr, lines)
   end)
 end
 
