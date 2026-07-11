@@ -10,7 +10,7 @@ end
 
 -- Populate preview buffer with an async dict.org lookup
 local function buf_set_lines(bufnr, lines)
-  if not vim.api.nvim_buf_is_valid(bufnr) then return end
+  if not bufnr or bufnr == 0 or not vim.api.nvim_buf_is_valid(bufnr) then return end
   vim.bo[bufnr].modifiable = true
   vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, lines)
   vim.bo[bufnr].modifiable = false
@@ -55,22 +55,20 @@ function M.open(lang_key, opts)
     opts.default_source = nil  -- don't leak into Snacks opts
   end
 
-  Snacks.picker.pick(vim.tbl_extend("force", {
-    source       = "lexicon_" .. lang_key,
-    title        = ("Lexicon  [%s]"):format(cfg.label),
-    default_text = vim.fn.expand("<cword>"),
-    layout       = { preview = "right" },
+  -- load word list synchronously (~100ms for 200k words, acceptable)
+  local items = {}
+  for line in io.lines(wf) do
+    if line ~= "" then
+      items[#items + 1] = { text = line, word = line }
+    end
+  end
 
-    -- Stream words from the system word list
-    finder = function()
-      local items = {}
-      for line in io.lines(wf) do
-        if line ~= "" then
-          items[#items + 1] = { text = line, word = line }
-        end
-      end
-      return items
-    end,
+  Snacks.picker.pick(vim.tbl_extend("force", {
+    source  = "lexicon_" .. lang_key,
+    title   = ("Lexicon  [%s]"):format(cfg.label),
+    pattern = vim.fn.expand("<cword>"),
+    layout  = { preview = "right" },
+    items   = items,
 
     -- Async preview: fetch definition from dict.org
     preview = function(ctx)
