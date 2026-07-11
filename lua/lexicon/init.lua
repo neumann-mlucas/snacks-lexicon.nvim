@@ -49,7 +49,7 @@ M.config = {
 
 M._state = { lang = "en", source_idx = 1 }
 
---- Merge user config. Call once from telescope setup extensions table.
+--- Merge user config. Call once from plugin setup.
 -- @param opts table  keys: server, port, timeout_ms, default_lang, languages
 function M.setup(opts)
   opts = opts or {}
@@ -98,7 +98,7 @@ end
 
 --- Async definition fetch; on_lines called on vim main thread.
 function M.fetch(word, database, on_lines)
-  local proto = require("telescope-lexicon.protocol")
+  local proto = require("lexicon.protocol")
   proto.define(
     M.config.server,
     M.config.port,
