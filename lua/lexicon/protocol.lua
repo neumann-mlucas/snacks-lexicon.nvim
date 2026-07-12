@@ -65,29 +65,36 @@ function M.define(server, port, database, word, timeout_ms, on_lines)
     finish()
   end)
 
-  client:connect(server, port, function(err)
-    if err then
+  -- uv.tcp:connect() requires an IP address, not a hostname
+  uv.getaddrinfo(server, nil, { family = "inet" }, function(err, res)
+    if err or not res or not res[1] then
       timer:close()
-      vim.schedule(function()
-        on_lines({})
-      end)
+      vim.schedule(function() on_lines({}) end)
       return
     end
 
-    local cmd = ("CLIENT nvim-telescope-lexicon\r\nDEFINE %s %s\r\nQUIT\r\n"):format(database, word)
-    client:write(cmd)
-
-    client:read_start(function(rerr, data)
-      if rerr or not data then
+    client:connect(res[1].addr, port, function(cerr)
+      if cerr then
         timer:close()
-        finish()
+        vim.schedule(function() on_lines({}) end)
         return
       end
-      buf = buf .. data
-      if buf:find("221[ \r]") then -- 221 = server goodbye after QUIT
-        timer:close()
-        finish()
-      end
+
+      local cmd = ("CLIENT nvim-lexicon\r\nDEFINE %s %s\r\nQUIT\r\n"):format(database, word)
+      client:write(cmd)
+
+      client:read_start(function(rerr, data)
+        if rerr or not data then
+          timer:close()
+          finish()
+          return
+        end
+        buf = buf .. data
+        if buf:find("221[ \r]") then -- 221 = server goodbye after QUIT
+          timer:close()
+          finish()
+        end
+      end)
     end)
   end)
 end
