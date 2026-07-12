@@ -54,22 +54,26 @@ opts = {
 
 ## Keybindings
 
-| Key     | Action                                  |
-| ------- | --------------------------------------- |
-| `<C-n>` | Cycle to next dictionary source         |
-| `<C-p>` | Cycle to previous dictionary source     |
-| `<CR>`  | Insert selected word at cursor position |
-| `<Esc>` | Close picker                            |
+| Key     | Action                                      |
+| ------- | ------------------------------------------- |
+| `<C-n>` | Cycle to next dictionary source             |
+| `<C-p>` | Cycle to previous dictionary source         |
+| `<C-a>` | Toggle parallel (all-sources) preview       |
+| `<CR>`  | Insert selected word at cursor position     |
+| `<Esc>` | Close picker                                |
 
 Source cycle order (English): `wn → moby-thesaurus → gcide → foldoc → jargon → …`
 
 ## Commands
 
-| Command          | Action                                       |
-| ---------------- | -------------------------------------------- |
-| `:Lexicon`       | Open picker for the configured default language |
-| `:Lexicon <lang>`| Open picker for `<lang>` (tab-completed)     |
-| `:checkhealth lexicon` | Verify snacks, word files, DNS         |
+| Command                    | Action                                          |
+| -------------------------- | ----------------------------------------------- |
+| `:Lexicon`                 | Open picker for the configured default language |
+| `:Lexicon <lang>`          | Open picker for `<lang>` (tab-completed)        |
+| `:LexiconDefine <word>`    | Floating popup with the definition (no picker)  |
+| `:LexiconDefine <word> <lang>` | Same, in a specific language                |
+| `:checkhealth lexicon`     | Verify snacks, word files, DNS                  |
+| `:help lexicon`            | Full documentation                              |
 
 ## Configuration
 

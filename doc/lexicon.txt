@@ -1,0 +1,189 @@
+*lexicon.txt*   Dictionary and thesaurus lookup for Neovim via dict.org
+
+==============================================================================
+CONTENTS                                                     *lexicon-contents*
+
+    1. Introduction ......................... |lexicon-intro|
+    2. Requirements ......................... |lexicon-requirements|
+    3. Setup ................................ |lexicon-setup|
+    4. Commands ............................. |lexicon-commands|
+    5. Keybindings inside the picker ........ |lexicon-picker-keys|
+    6. Configuration ........................ |lexicon-config|
+    7. Lua API .............................. |lexicon-api|
+    8. Architecture ......................... |lexicon-architecture|
+    9. Troubleshooting ...................... |lexicon-troubleshoot|
+
+==============================================================================
+1. INTRODUCTION                                                 *lexicon-intro*
+
+snacks-lexicon.nvim is a dictionary + thesaurus picker backed by the DICT
+protocol (RFC 2229) and the |snacks.picker| UI. It ships no shell dependencies:
+the client speaks DICT over raw TCP through |vim.uv|.
+
+Features~
+    - Fuzzy search over the system word list (|/usr/share/dict/words|)
+    - Live async definition preview from dict.org
+    - Cycle multiple dictionary sources per language
+    - Parallel mode: fetch all sources at once
+    - Automatic "did you mean" suggestions on empty results
+    - Multi-language profiles (en/pt/de/es/fr, user-extensible)
+    - Direct floating popup via |:LexiconDefine|
+    - Bounded LRU cache — instant repeat lookups
+
+==============================================================================
+2. REQUIREMENTS                                          *lexicon-requirements*
+
+    - Neovim 0.9+ (uses `vim.uv`)
+    - snacks.nvim (https://github.com/folke/snacks.nvim) with picker enabled
+    - A readable system word list for each language you use
+    - Internet access to `dict.org` (or your own DICT server)
+
+==============================================================================
+3. SETUP                                                        *lexicon-setup*
+
+With |lazy.nvim|: >lua
+
+    {
+      "neumann-mlucas/snacks-lexicon.nvim",
+      lazy = true,
+      cmd  = { "Lexicon", "LexiconDefine" },
+      keys = {
+        { "<leader>we", function() require("lexicon.picker").en() end, desc = "Lexicon: English" },
+        { "<leader>wp", function() require("lexicon.picker").pt() end, desc = "Lexicon: Português" },
+      },
+      opts = {
+        default_lang = "en",
+        parallel     = false,   -- true = fetch all sources at once
+        suggest      = true,    -- MATCH fallback on empty results
+      },
+      config = function(_, opts) require("lexicon").setup(opts) end,
+    }
+<
+==============================================================================
+4. COMMANDS                                                  *lexicon-commands*
+
+                                                                     *:Lexicon*
+:Lexicon [{lang}]       Open the picker for `{lang}`, or the configured
+                        default language when called with no argument.
+                        `{lang}` tab-completes over |lexicon.config.languages|.
+
+                                                               *:LexiconDefine*
+:LexiconDefine {word} [{lang}]
+                        Open a floating window with the definition of `{word}`
+                        using the current source for `{lang}`. Press `q` or
+                        `<Esc>` to close. Cached results render instantly.
+
+:checkhealth lexicon    Verify dependencies, word file availability, DNS.
+
+==============================================================================
+5. KEYBINDINGS INSIDE THE PICKER                          *lexicon-picker-keys*
+
+    <CR>        Insert the selected word at cursor position
+    <C-n>       Cycle to the next dictionary source
+    <C-p>       Cycle to the previous dictionary source
+    <C-a>       Toggle parallel (all-sources) mode
+    <Esc>       Close the picker
+
+The picker's title bar shows the active language and source:
+`Lexicon [English | wn]`. It updates when you cycle.
+
+==============================================================================
+6. CONFIGURATION                                               *lexicon-config*
+
+Top-level options passed to |lexicon.setup()|:
+
+    server         string    DICT server hostname       (default: "dict.org")
+    port           number    DICT port                  (default: 2628)
+    timeout_ms     number    request timeout in ms      (default: 3000)
+    default_lang   string    initial language key       (default: "en")
+    parallel       boolean   fetch all sources at once  (default: false)
+    suggest        boolean   MATCH fallback on empty    (default: true)
+    languages      table     language profiles          (see below)
+
+Language profiles~
+
+Each key in `languages` is an arbitrary lang code (`en`, `pt`, `ja`, …). The
+value is a table with:
+
+    label        string      human-readable name shown in the picker title
+    sources      string[]    ordered list of DICT database names to cycle
+    word_files   string[]    candidate file paths; first readable one wins
+
+Complete example: >lua
+
+    require("lexicon").setup({
+      default_lang = "en",
+      parallel     = true,
+      languages = {
+        en = {
+          label      = "English",
+          sources    = { "wn", "moby-thesaurus", "gcide" },
+          word_files = { "/usr/share/dict/words" },
+        },
+        ja = {
+          label      = "日本語",
+          sources    = { "fd-jpn-eng" },
+          word_files = { "/usr/share/dict/japanese" },
+        },
+      },
+    })
+<
+
+==============================================================================
+7. LUA API                                                        *lexicon-api*
+
+require("lexicon.picker").open({lang}, {opts})              *lexicon.picker.open*
+    Open the picker for `{lang}` (defaults to `default_lang`).
+    `{opts}.default_source` starts on a specific source.
+
+require("lexicon.picker").{lang}({opts})               *lexicon.picker.<lang>*
+    Shorthand for `open("<lang>", opts)`. Any key present in
+    `config.languages` is auto-exported.
+
+require("lexicon.define").show({word}, {lang}, {source})   *lexicon.define.show*
+    Show the definition of `{word}` in a floating window.
+
+require("lexicon").fetch({word}, {db}, {cb})                    *lexicon.fetch*
+    Async DICT DEFINE. `{cb}` is called with a `string[]` on the main
+    thread. Returns `{ cancel = fun() }`.
+
+require("lexicon").match({word}, {db}, {cb})                    *lexicon.match*
+    Async DICT MATCH. `{cb}` receives an array of candidate words.
+
+require("lexicon").fetch_all({word}, {lang}, {cb})          *lexicon.fetch_all*
+    Fetch every source configured for `{lang}` concurrently. `{cb}`
+    receives `{{ src=..., lines={...} }, ...}`.
+
+require("lexicon.cache").clear()                          *lexicon.cache.clear*
+    Wipe the definition cache.
+
+==============================================================================
+8. ARCHITECTURE                                          *lexicon-architecture*
+
+    plugin/lexicon.lua      User commands (:Lexicon, :LexiconDefine)
+    lua/lexicon/
+      protocol.lua          DICT TCP client via vim.uv
+      init.lua              Config, per-lang state, fetch/match/fetch_all
+      cache.lua             Bounded LRU (100 entries) for definitions
+      health.lua            :checkhealth lexicon
+      define.lua            :LexiconDefine floating popup
+      picker.lua            snacks.picker integration
+
+==============================================================================
+9. TROUBLESHOOTING                                        *lexicon-troubleshoot*
+
+Nothing happens on <leader>we                                   ~
+    Run `:Lazy update snacks-lexicon.nvim` and `:checkhealth lexicon`.
+
+"no word file found"                                            ~
+    Install a system dictionary package (`words`, `wamerican`, etc.) or
+    override `languages.<lang>.word_files` with a real path.
+
+Preview always says "fetching…"                                 ~
+    Server timeout. Check `:checkhealth lexicon`, raise `timeout_ms`, or
+    point `server` at a mirror.
+
+Snacks picker not enabled                                       ~
+    In your snacks.nvim config, ensure `picker = { enabled = true }`.
+
+ vim:tw=78:ts=4:ft=help:norl:

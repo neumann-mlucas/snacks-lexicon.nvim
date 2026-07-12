@@ -11,13 +11,14 @@ local WORD_CACHE = {}
 -- Prevents flooding the server when the user scrolls fast.
 local DEBOUNCE_MS = 150
 
--- Format raw DICT protocol lines into cleaner display lines.
+local NS = vim.api.nvim_create_namespace("snacks_lexicon_hl")
+
+-- Format a single source's raw DICT lines into cleaner display lines.
 local function pretty(lines, word, src)
   local out = {}
   out[#out + 1] = ("  %s"):format(vim.fn.toupper(word))
   out[#out + 1] = ("  source: %s"):format(src)
   out[#out + 1] = ""
-
   for _, line in ipairs(lines) do
     if line == "" then
       out[#out + 1] = ""
@@ -29,6 +30,71 @@ local function pretty(lines, word, src)
     end
   end
   return out
+end
+
+-- Combine multiple {src, lines} results into a single stacked output.
+local function pretty_all(results, word)
+  local out = {}
+  out[#out + 1] = ("  %s"):format(vim.fn.toupper(word))
+  out[#out + 1] = ""
+  for _, r in ipairs(results) do
+    out[#out + 1] = ("── %s ──"):format(r.src)
+    out[#out + 1] = ""
+    if #r.lines == 0 then
+      out[#out + 1] = "  (no definition)"
+    else
+      for _, line in ipairs(r.lines) do
+        if line:match("^%s*%d+%.") then
+          out[#out + 1] = ""
+          out[#out + 1] = line
+        else
+          out[#out + 1] = line
+        end
+      end
+    end
+    out[#out + 1] = ""
+  end
+  return out
+end
+
+-- Apply extmark highlights to a preview buffer. Called after content is
+-- written. Cheap linear scan; buffers are small (a few hundred lines).
+local function apply_highlights(preview)
+  local buf = preview and preview.win and preview.win.buf
+  if not buf or not vim.api.nvim_buf_is_valid(buf) then return end
+  vim.api.nvim_buf_clear_namespace(buf, NS, 0, -1)
+
+  local n = vim.api.nvim_buf_line_count(buf)
+  for i = 0, n - 1 do
+    local line = vim.api.nvim_buf_get_lines(buf, i, i + 1, false)[1] or ""
+
+    if i < 2 and line:match("^  %u") then
+      vim.api.nvim_buf_add_highlight(buf, NS, "Title", i, 0, -1)
+    elseif line:match("^  source:") then
+      vim.api.nvim_buf_add_highlight(buf, NS, "Comment", i, 0, -1)
+    elseif line:match("^──") then
+      vim.api.nvim_buf_add_highlight(buf, NS, "Function", i, 0, -1)
+    elseif line:match("^%s*%d+%.") then
+      local _, e = line:find("^%s*%d+%.")
+      vim.api.nvim_buf_add_highlight(buf, NS, "Number", i, 0, e)
+    elseif line:match("^%s+See also") or line:match("^%s+Syn:") or line:match("^%s+Ant:") then
+      vim.api.nvim_buf_add_highlight(buf, NS, "Statement", i, 0, -1)
+    end
+    -- Bracketed cross-refs like {word}
+    local s, e = 0, 0
+    while true do
+      s, e = line:find("{[^}]+}", e + 1)
+      if not s then break end
+      vim.api.nvim_buf_add_highlight(buf, NS, "Underlined", i, s - 1, e)
+    end
+    -- Part-of-speech tags: [n], [v], [adj]
+    s, e = 0, 0
+    while true do
+      s, e = line:find("%[%a+%]", e + 1)
+      if not s then break end
+      vim.api.nvim_buf_add_highlight(buf, NS, "Type", i, s - 1, e)
+    end
+  end
 end
 
 -- Write lines through the snacks preview object.
@@ -112,8 +178,7 @@ function M.open(lang_key, opts)
     return
   end
 
-  -- Reset source cycle; honour caller's default_source if valid.
-  lex._state.source_idx = 1
+  -- Honour caller's default_source; otherwise keep last-used per language.
   if opts.default_source then
     local ok = lex.set_source(lang_key, opts.default_source)
     if not ok then
@@ -156,35 +221,92 @@ function M.open(lang_key, opts)
     end
   end
 
-  -- Render either the definition or a "no definition" placeholder.
-  local function render(preview, word, src, lines)
+  -- Update the picker's main title with the language + current source.
+  local function refresh_title(picker)
+    if not picker then return end
+    local src = lex.current_source(lang_key)
+    picker.title = ("Lexicon [%s | %s]"):format(cfg.label, src)
+    pcall(function() picker:update_titles() end)
+  end
+
+  -- Render either the definition or a "no definition" placeholder + suggestions.
+  local function render_one(preview, word, src, lines, suggestions)
     if #lines == 0 then
-      write_lines(preview, { "", "  no definition found: " .. word })
+      local buf = { "", "  no definition found: " .. word }
+      if suggestions and #suggestions > 0 then
+        buf[#buf + 1] = ""
+        buf[#buf + 1] = "  did you mean:"
+        for _, s in ipairs(suggestions) do
+          if #buf < 30 then buf[#buf + 1] = "    - " .. s end
+        end
+      end
+      write_lines(preview, buf)
     else
       write_lines(preview, pretty(lines, word, src))
     end
     if preview and preview.win then set_title(preview.win, src) end
+    apply_highlights(preview)
+  end
+
+  local function render_all(preview, word, results)
+    write_lines(preview, pretty_all(results, word))
+    if preview and preview.win then set_title(preview.win, "all sources") end
+    apply_highlights(preview)
   end
 
   -- Fire an async preview fetch after a short debounce.
-  local function schedule_fetch(preview, word, src)
+  local function schedule_fetch(preview, picker, word)
     state.gen = state.gen + 1
     local my_gen = state.gen
     cancel_timer()
     cancel_fetch()
 
+    refresh_title(picker)
+    local src = lex.current_source(lang_key)
     if preview and preview.win then set_title(preview.win, src) end
 
-    -- Cache hit: render immediately, skip debounce and network entirely.
-    -- Empty tables ARE cached (negative cache) → same fast path for misses.
+    -- Parallel mode: fetch every source at once, cache each individually.
+    if lex.config.parallel then
+      -- Try cache first: only run remote calls for uncached sources.
+      local cached_all = {}
+      local missing = false
+      for _, s in ipairs(cfg.sources) do
+        local hit = cache.get(word, s)
+        if hit then
+          cached_all[#cached_all + 1] = { src = s, lines = hit }
+        else
+          missing = true
+          break
+        end
+      end
+      if not missing and #cached_all == #cfg.sources then
+        render_all(preview, word, cached_all)
+        return
+      end
+
+      write_lines(preview, { "", "  fetching all sources…" })
+      state.timer = uv.new_timer()
+      state.timer:start(DEBOUNCE_MS, 0, vim.schedule_wrap(function()
+        cancel_timer()
+        if state.gen ~= my_gen then return end
+        state.fetch = lex.fetch_all(word, lang_key, function(results)
+          state.fetch = nil
+          if state.gen ~= my_gen then return end
+          for _, r in ipairs(results) do cache.set(word, r.src, r.lines) end
+          render_all(preview, word, results)
+        end)
+      end))
+      return
+    end
+
+    -- Single-source: cache hit renders immediately.
     local hit = cache.get(word, src)
     if hit then
-      render(preview, word, src, hit)
+      render_one(preview, word, src, hit, nil)
       return
     end
 
     write_lines(preview, { "", "  fetching…" })
-
     state.timer = uv.new_timer()
     state.timer:start(DEBOUNCE_MS, 0, vim.schedule_wrap(function()
       cancel_timer()
@@ -192,10 +314,19 @@ function M.open(lang_key, opts)
 
       state.fetch = lex.fetch(word, src, function(lines)
         state.fetch = nil
-        if state.gen ~= my_gen then return end  -- newer preview took over
+        if state.gen ~= my_gen then return end
+        cache.set(word, src, lines)
 
-        cache.set(word, src, lines)  -- cache even empty results to avoid re-hits
-        render(preview, word, src, lines)
+        -- No result and suggestions enabled → fire a MATCH request.
+        if #lines == 0 and lex.config.suggest then
+          state.fetch = lex.match(word, src, function(matches)
+            state.fetch = nil
+            if state.gen ~= my_gen then return end
+            render_one(preview, word, src, lines, matches)
+          end)
+        else
+          render_one(preview, word, src, lines, nil)
+        end
       end)
     end))
   end
@@ -210,7 +341,7 @@ function M.open(lang_key, opts)
 
   pick(vim.tbl_extend("force", {
     source  = "lexicon_" .. lang_key,
-    title   = ("Lexicon [%s]"):format(cfg.label),
+    title   = ("Lexicon [%s | %s]"):format(cfg.label, lex.current_source(lang_key)),
     pattern = seed_pattern(),
     format  = "text",
     items   = items,
@@ -233,7 +364,7 @@ function M.open(lang_key, opts)
     },
 
     preview = function(ctx)
-      schedule_fetch(ctx.preview, ctx.item.word, lex.current_source(lang_key))
+      schedule_fetch(ctx.preview, ctx.picker, ctx.item.word)
     end,
 
     confirm = function(picker, item)
@@ -249,20 +380,28 @@ function M.open(lang_key, opts)
       lexicon_cycle_source = function(picker)
         local item = picker.list:current()
         if not item then return end
-        schedule_fetch(picker.preview, item.word, lex.cycle_source(lang_key))
+        lex.cycle_source(lang_key)
+        schedule_fetch(picker.preview, picker, item.word)
       end,
       lexicon_prev_source = function(picker)
         local item = picker.list:current()
         if not item then return end
-        schedule_fetch(picker.preview, item.word, lex.cycle_source_prev(lang_key))
+        lex.cycle_source_prev(lang_key)
+        schedule_fetch(picker.preview, picker, item.word)
+      end,
+      lexicon_toggle_parallel = function(picker)
+        lex.config.parallel = not lex.config.parallel
+        local item = picker.list:current()
+        if item then schedule_fetch(picker.preview, picker, item.word) end
       end,
     },
 
     win = {
       input = {
         keys = {
-          ["<C-n>"] = { "lexicon_cycle_source", mode = { "i", "n" } },
-          ["<C-p>"] = { "lexicon_prev_source",  mode = { "i", "n" } },
+          ["<C-n>"] = { "lexicon_cycle_source",   mode = { "i", "n" } },
+          ["<C-p>"] = { "lexicon_prev_source",    mode = { "i", "n" } },
+          ["<C-a>"] = { "lexicon_toggle_parallel", mode = { "i", "n" } },
         },
       },
     },

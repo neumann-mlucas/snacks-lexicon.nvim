@@ -46,28 +46,39 @@ local function dict_quote(s)
   return '"' .. tostring(s):gsub("\\", "\\\\"):gsub('"', '\\"') .. '"'
 end
 
---- Fetch a definition via the DICT protocol.
--- @param server     string  hostname or IP
--- @param port       number  usually 2628
--- @param database   string  e.g. "wn", "moby-thesaurus"
--- @param word       string  word to look up (CRLF stripped for safety)
--- @param timeout_ms number  milliseconds before giving up
--- @param on_lines   fun(lines: string[])  called on vim main thread
--- @return { cancel = fun() }  aborts in-flight request without invoking on_lines
-function M.define(server, port, database, word, timeout_ms, on_lines)
-  -- Strip CRLF; RFC quoting handles everything else
-  word = tostring(word or ""):gsub("[\r\n]", "")
+-- Extract matches from a MATCH response body. Each line is `<db> "<word>"`
+-- (or unquoted); we only keep the word.
+local function parse_matches(raw)
+  local out, in_matches = {}, false
+  for line in (raw .. "\n"):gmatch("([^\n]*)\n") do
+    line = line:gsub("\r$", "")
+    local code = line:match("^(%d%d%d)[ \r]") or line:match("^(%d%d%d)$")
+    if code then
+      if code == "152" then in_matches = true
+      elseif code == "250" or code == "550" or code == "552" then in_matches = false
+      end
+    elseif line == "." then
+      in_matches = false
+    elseif in_matches then
+      local w = line:match('%s*%S+%s+"(.-)"') or line:match("%s*%S+%s+(%S+)")
+      if w then out[#out + 1] = w end
+    end
+  end
+  return out
+end
+
+-- Generic request runner: build a command from `builder(db, word)` and parse
+-- the accumulated response with `parser`. Both are provided by the caller.
+local function run_request(server, port, database, word, timeout_ms, on_result, builder, parser)
+  word     = tostring(word or ""):gsub("[\r\n]", "")
   database = tostring(database or ""):gsub("[\r\n]", "")
 
   local buf, done = "", false
   local client, timer
 
   local function safe_close(handle)
-    if handle and not handle:is_closing() then
-      pcall(handle.close, handle)
-    end
+    if handle and not handle:is_closing() then pcall(handle.close, handle) end
   end
-
   local function cleanup()
     safe_close(timer)
     if client then
@@ -76,35 +87,27 @@ function M.define(server, port, database, word, timeout_ms, on_lines)
       client = nil
     end
   end
-
-  local function finish(lines)
+  local function finish(result)
     if done then return end
     done = true
     cleanup()
-    vim.schedule(function() on_lines(lines or parse(buf)) end)
+    vim.schedule(function() on_result(result or parser(buf)) end)
   end
-
   local function cancel()
     if done then return end
-    done = true      -- prevent finish() from firing on_lines
+    done = true
     cleanup()
   end
 
   timer = uv.new_timer()
   timer:start(timeout_ms, 0, function() finish({}) end)
 
-  -- Resolve host without pinning to IPv4 so IPv6-only networks still work
   uv.getaddrinfo(server, tostring(port), { socktype = "stream" }, function(err, res)
-    if err or not res or not res[1] then
-      finish({})
-      return
-    end
+    if err or not res or not res[1] then finish({}) return end
 
-    -- Try each returned address in order; fall through on connect failure
     local function try(i)
       if done or i > #res then finish({}) return end
       local addr = res[i]
-
       client = uv.new_tcp(addr.family == "inet6" and "inet6" or "inet")
       client:connect(addr.addr, port, function(cerr)
         if cerr then
@@ -112,25 +115,41 @@ function M.define(server, port, database, word, timeout_ms, on_lines)
           try(i + 1)
           return
         end
-
-        local cmd = ("CLIENT nvim-lexicon\r\nDEFINE %s %s\r\nQUIT\r\n"):format(
-          dict_quote(database), dict_quote(word))
-        client:write(cmd, function(werr)
+        client:write(builder(dict_quote(database), dict_quote(word)), function(werr)
           if werr then finish({}) end
         end)
-
         client:read_start(function(rerr, data)
           if rerr or not data then finish() return end
           buf = buf .. data
-          if response_complete(buf) then finish() end
+          if buf:find("\n221[ \r]") or buf:find("^221[ \r]") then finish() end
         end)
       end)
     end
-
     try(1)
   end)
 
   return { cancel = cancel }
+end
+
+--- Fetch a definition via the DICT protocol.
+-- @return { cancel = fun() }
+function M.define(server, port, database, word, timeout_ms, on_lines)
+  return run_request(server, port, database, word, timeout_ms, on_lines,
+    function(db, w)
+      return ("CLIENT nvim-lexicon\r\nDEFINE %s %s\r\nQUIT\r\n"):format(db, w)
+    end,
+    parse)
+end
+
+--- Fuzzy match a word against a database. Uses the "." strategy which lets
+--- the server pick a reasonable default (lev/soundex depending on the db).
+--- @return { cancel = fun() }
+function M.match(server, port, database, word, timeout_ms, on_matches)
+  return run_request(server, port, database, word, timeout_ms, on_matches,
+    function(db, w)
+      return ("CLIENT nvim-lexicon\r\nMATCH %s . %s\r\nQUIT\r\n"):format(db, w)
+    end,
+    parse_matches)
 end
 
 return M

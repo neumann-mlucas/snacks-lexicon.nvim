@@ -1,0 +1,62 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  lint-and-load:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        nvim: ["v0.9.5", "v0.10.4", "stable", "nightly"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Neovim
+        uses: rhysd/action-setup-vim@v1
+        with:
+          neovim: true
+          version: ${{ matrix.nvim }}
+
+      - name: Install stylua
+        uses: JohnnyMorganz/stylua-action@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          version: latest
+          args: --check lua/ plugin/
+
+      - name: Check module loading
+        run: |
+          nvim --headless -u NONE \
+            -c "lua vim.cmd('set rtp+=' .. vim.fn.getcwd())" \
+            -c "lua local mods = { 'lexicon.protocol', 'lexicon.cache', 'lexicon', 'lexicon.health', 'lexicon.define', 'lexicon.picker' }
+                for _, m in ipairs(mods) do
+                  local ok, err = pcall(require, m)
+                  if not ok then io.stderr:write(m .. ' FAILED: ' .. tostring(err) .. '\n'); vim.cmd('cq 1') end
+                  print(m .. ' OK')
+                end" \
+            -c "q" 2>&1
+
+      - name: Check user commands register
+        run: |
+          nvim --headless -u NONE \
+            -c "lua vim.cmd('set rtp+=' .. vim.fn.getcwd())" \
+            -c "runtime plugin/lexicon.lua" \
+            -c "lua for _, cmd in ipairs({ 'Lexicon', 'LexiconDefine' }) do
+                  if vim.fn.exists(':' .. cmd) == 0 then
+                    io.stderr:write(cmd .. ' not defined\n'); vim.cmd('cq 1')
+                  end
+                  print(cmd .. ' OK')
+                end" \
+            -c "q" 2>&1
+
+      - name: Verify helptags build
+        run: |
+          nvim --headless -u NONE \
+            -c "helptags doc" \
+            -c "q" 2>&1

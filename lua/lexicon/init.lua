@@ -41,9 +41,23 @@ M.config = {
   timeout_ms   = 3000,
   default_lang = "en",
   languages    = LANG_DEFAULTS,
+  parallel     = false,   -- true → preview fetches all sources at once
+  suggest      = true,    -- true → MATCH ... on empty define result
 }
 
-M._state = { source_idx = 1 }
+-- Per-language cursor into cfg.sources so switching languages does not
+-- clobber the source another language is on.
+M._state = { source_idx_by_lang = {} }
+
+local function idx_for(lang_key)
+  local lk = lang_key or M.config.default_lang
+  return M._state.source_idx_by_lang[lk] or 1
+end
+
+local function set_idx(lang_key, i)
+  local lk = lang_key or M.config.default_lang
+  M._state.source_idx_by_lang[lk] = i
+end
 
 --- Merge user config. Call once from plugin setup.
 -- @param opts table  keys: server, port, timeout_ms, default_lang, languages
@@ -64,7 +78,7 @@ function M.setup(opts)
     end
   end
 
-  M._state.source_idx = 1
+  M._state.source_idx_by_lang = {}
 end
 
 --- Return language config table for lang_key (falls back to default_lang).
@@ -76,20 +90,20 @@ end
 --- Current active dict.org source for lang_key.
 function M.current_source(lang_key)
   local cfg = M.lang_cfg(lang_key)
-  return cfg.sources[M._state.source_idx] or cfg.sources[1]
+  return cfg.sources[idx_for(lang_key)] or cfg.sources[1]
 end
 
 --- Advance to next source in the cycle; returns new source name.
 function M.cycle_source(lang_key)
   local n = #M.lang_cfg(lang_key).sources
-  M._state.source_idx = (M._state.source_idx % n) + 1
+  set_idx(lang_key, (idx_for(lang_key) % n) + 1)
   return M.current_source(lang_key)
 end
 
 --- Step to previous source; returns new source name.
 function M.cycle_source_prev(lang_key)
   local n = #M.lang_cfg(lang_key).sources
-  M._state.source_idx = ((M._state.source_idx - 2) % n) + 1
+  set_idx(lang_key, ((idx_for(lang_key) - 2) % n) + 1)
   return M.current_source(lang_key)
 end
 
@@ -98,7 +112,7 @@ function M.set_source(lang_key, name)
   local sources = M.lang_cfg(lang_key).sources
   for i, s in ipairs(sources) do
     if s == name then
-      M._state.source_idx = i
+      set_idx(lang_key, i)
       return true
     end
   end
@@ -127,6 +141,50 @@ function M.fetch(word, database, on_lines)
     M.config.timeout_ms,
     on_lines
   )
+end
+
+--- Async MATCH — fuzzy-list candidate words in a database.
+-- @return { cancel = fun() }
+function M.match(word, database, on_matches)
+  local proto = require("lexicon.protocol")
+  return proto.match(
+    M.config.server,
+    M.config.port,
+    database,
+    word,
+    M.config.timeout_ms,
+    on_matches
+  )
+end
+
+--- Fetch a word from every source configured for lang_key concurrently.
+-- Calls on_result with an ordered array `{ { src = "wn", lines = {...} }, ... }`
+-- when the last source completes. Empty results are included so callers can
+-- render a "no definition" marker for each source.
+-- @return { cancel = fun() }
+function M.fetch_all(word, lang_key, on_result)
+  local cfg      = M.lang_cfg(lang_key)
+  local sources  = cfg.sources
+  local results  = {}
+  local pending  = #sources
+  local handles  = {}
+  local canceled = false
+
+  for i, src in ipairs(sources) do
+    handles[i] = M.fetch(word, src, function(lines)
+      if canceled then return end
+      results[i] = { src = src, lines = lines }
+      pending = pending - 1
+      if pending == 0 then on_result(results) end
+    end)
+  end
+
+  return {
+    cancel = function()
+      canceled = true
+      for _, h in ipairs(handles) do pcall(function() h.cancel() end) end
+    end,
+  }
 end
 
 return M
