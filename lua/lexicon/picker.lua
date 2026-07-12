@@ -4,16 +4,13 @@ local M   = {}
 -- Format raw DICT protocol lines into cleaner display lines
 local function pretty(lines, word, src)
   local out = {}
-  -- header: word + source
   out[#out + 1] = ("  %s"):format(word:upper())
   out[#out + 1] = ("  source: %s"):format(src)
   out[#out + 1] = ""
 
   for _, line in ipairs(lines) do
-    -- blank lines → preserve spacing
     if line == "" then
       out[#out + 1] = ""
-    -- definition number lines (e.g. "1. (n) cat --")
     elseif line:match("^%s*%d+%.") then
       out[#out + 1] = ""
       out[#out + 1] = line
@@ -25,13 +22,17 @@ local function pretty(lines, word, src)
   return out
 end
 
--- Write lines into a preview buffer, handling modifiable flag
+-- Write lines into a preview buffer; modifiable guard, no filetype touch
 local function write_buf(bufnr, lines)
   if not bufnr or bufnr == 0 or not vim.api.nvim_buf_is_valid(bufnr) then return end
   vim.bo[bufnr].modifiable = true
   vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, lines)
   vim.bo[bufnr].modifiable = false
-  vim.bo[bufnr].filetype = "snacks_picker_preview"
+end
+
+-- Safe title update: no-op if window is already closed
+local function set_title(win, title)
+  pcall(function() win:set_title(title) end)
 end
 
 --- Open a lexicon picker for lang_key.
@@ -76,13 +77,12 @@ function M.open(lang_key, opts)
     format  = "text",
     items   = items,
 
-    -- wider layout: preview takes 65% of horizontal space
     layout = {
       layout = {
-        box      = "horizontal",
-        width    = 0.92,
-        height   = 0.88,
-        border   = "rounded",
+        box    = "horizontal",
+        width  = 0.92,
+        height = 0.88,
+        border = "rounded",
         {
           box    = "vertical",
           border = true,
@@ -94,25 +94,23 @@ function M.open(lang_key, opts)
       },
     },
 
-    -- Async preview with pretty-print and source in title
     preview = function(ctx)
-      local word  = ctx.item.word
-      local src   = lex.current_source(lang_key)
+      local word = ctx.item.word
+      local src  = lex.current_source(lang_key)
       local bufnr = ctx.buf
+      local pwin  = ctx.preview.win
 
-      ctx.preview.win:set_title(src)
+      set_title(pwin, src)
       ctx.preview:set_lines({ "", "  fetching…" })
 
       lex.fetch(word, src, function(lines)
-        local out = #lines == 0
+        write_buf(bufnr, #lines == 0
           and { "", "  no definition found: " .. word }
-          or pretty(lines, word, src)
-        write_buf(bufnr, out)
-        ctx.preview.win:set_title(src)
+          or pretty(lines, word, src))
+        set_title(pwin, src)
       end)
     end,
 
-    -- <CR>: insert selected word at cursor position
     confirm = function(picker, item)
       picker:close()
       if item then
@@ -122,26 +120,27 @@ function M.open(lang_key, opts)
       end
     end,
 
-    -- <C-n>: cycle dict.org source, refresh preview
     actions = {
       lexicon_cycle_source = function(picker)
         local src  = lex.cycle_source(lang_key)
         local item = picker.list:current()
         if not item then return end
 
-        picker.preview.win:set_title(src)
+        local pwin  = picker.preview.win
+        local bufnr = pwin.buf
+
+        set_title(pwin, src)
         picker.preview:set_lines({ "", "  fetching…" })
-        local bufnr = picker.preview.win.buf
 
         lex.fetch(item.word, src, function(lines)
-          local out = #lines == 0
+          write_buf(bufnr, #lines == 0
             and { "", "  no definition found: " .. item.word }
-            or pretty(lines, item.word, src)
-          write_buf(bufnr, out)
-          picker.preview.win:set_title(src)
+            or pretty(lines, item.word, src))
+          set_title(pwin, src)
         end)
       end,
     },
+
     win = {
       input = {
         keys = {
