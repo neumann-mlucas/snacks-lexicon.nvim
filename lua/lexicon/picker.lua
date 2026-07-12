@@ -90,7 +90,7 @@ function M.open(lang_key, opts)
           { win = "input", height = 1, border = "bottom" },
           { win = "list",  border = "none" },
         },
-        { win = "preview", title = "{preview}", border = true, width = 0.65 },
+        { win = "preview", title = "{preview}", border = true, width = 0.72 },
       },
     },
 
@@ -100,7 +100,7 @@ function M.open(lang_key, opts)
       local src   = lex.current_source(lang_key)
       local bufnr = ctx.buf
 
-      ctx.preview:set_title(src)
+      ctx.preview.win:set_title(src)
       ctx.preview:set_lines({ "", "  fetching…" })
 
       lex.fetch(word, src, function(lines)
@@ -108,7 +108,7 @@ function M.open(lang_key, opts)
           and { "", "  no definition found: " .. word }
           or pretty(lines, word, src)
         write_buf(bufnr, out)
-        ctx.preview:set_title(src)
+        ctx.preview.win:set_title(src)
       end)
     end,
 
@@ -127,10 +127,9 @@ function M.open(lang_key, opts)
       lexicon_cycle_source = function(picker)
         local src  = lex.cycle_source(lang_key)
         local item = picker.list:current()
-        vim.notify(("lexicon source → %s"):format(src), vim.log.levels.INFO)
         if not item then return end
 
-        picker.preview:set_title(src)
+        picker.preview.win:set_title(src)
         picker.preview:set_lines({ "", "  fetching…" })
         local bufnr = picker.preview.win.buf
 
@@ -139,7 +138,7 @@ function M.open(lang_key, opts)
             and { "", "  no definition found: " .. item.word }
             or pretty(lines, item.word, src)
           write_buf(bufnr, out)
-          picker.preview:set_title(src)
+          picker.preview.win:set_title(src)
         end)
       end,
     },
