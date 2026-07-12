@@ -1,35 +1,9 @@
 local lex = require("lexicon")
 local M   = {}
 
-local function cat_cmd(path)
-  if vim.fn.has("win32") == 1 then
-    return { "cmd", "/c", "type", path }
-  end
-  return { "cat", path }
-end
-
--- Populate preview buffer with an async dict.org lookup
-local function buf_set_lines(bufnr, lines)
-  if not bufnr or bufnr == 0 or not vim.api.nvim_buf_is_valid(bufnr) then return end
-  vim.bo[bufnr].modifiable = true
-  vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, lines)
-  vim.bo[bufnr].modifiable = false
-end
-
-local function update_preview(bufnr, word, src)
-  buf_set_lines(bufnr, { ("[%s]  fetching %q …"):format(src, word) })
-
-  lex.fetch(word, src, function(lines)
-    if #lines == 0 then lines = { "no definition found: " .. word } end
-    lines[#lines + 1] = ""
-    lines[#lines + 1] = ("── %s ──"):format(src)
-    buf_set_lines(bufnr, lines)
-  end)
-end
-
 --- Open a lexicon picker for lang_key.
 -- @param lang_key string|nil  e.g. "en", "pt", "de". Defaults to config.default_lang.
--- @param opts     table|nil   Merged into Snacks.picker opts (title, default_text, …)
+-- @param opts     table|nil   Merged into Snacks.picker opts.
 function M.open(lang_key, opts)
   opts     = opts or {}
   lang_key = lang_key or lex.config.default_lang
@@ -48,14 +22,13 @@ function M.open(lang_key, opts)
   -- reset source cycle; honour caller's default_source if given
   lex._state.source_idx = 1
   if opts.default_source then
-    local sources = cfg.sources
-    for i, s in ipairs(sources) do
+    for i, s in ipairs(cfg.sources) do
       if s == opts.default_source then lex._state.source_idx = i; break end
     end
-    opts.default_source = nil  -- don't leak into Snacks opts
+    opts.default_source = nil
   end
 
-  -- load word list synchronously (~100ms for 200k words, acceptable)
+  -- load word list (~100ms for 200k words)
   local items = {}
   for line in io.lines(wf) do
     if line ~= "" then
@@ -68,18 +41,36 @@ function M.open(lang_key, opts)
     title   = ("Lexicon  [%s]"):format(cfg.label),
     pattern = vim.fn.expand("<cword>"),
     layout  = { preview = "right" },
+    format  = "text",   -- items have no 'file' field; use text formatter
     items   = items,
 
     -- Async preview: fetch definition from dict.org
     preview = function(ctx)
-      update_preview(ctx.buf, ctx.item.word, lex.current_source(lang_key))
+      local word    = ctx.item.word
+      local src     = lex.current_source(lang_key)
+      local bufnr   = ctx.buf  -- capture now; preview may change item
+      ctx.preview:set_lines({ ("[%s]  fetching %q …"):format(src, word) })
+
+      lex.fetch(word, src, function(lines)
+        if #lines == 0 then lines = { "no definition found: " .. word } end
+        lines[#lines + 1] = ""
+        lines[#lines + 1] = ("── %s ──"):format(src)
+        -- write to the captured buf; guard in case picker closed
+        if vim.api.nvim_buf_is_valid(bufnr) then
+          vim.bo[bufnr].modifiable = true
+          vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, lines)
+          vim.bo[bufnr].modifiable = false
+        end
+      end)
     end,
 
-    -- <CR>: insert selected word at cursor
+    -- <CR>: insert selected word at cursor position
     confirm = function(picker, item)
       picker:close()
       if item then
-        vim.api.nvim_put({ item.word }, "c", true, true)
+        vim.schedule(function()
+          vim.api.nvim_put({ item.word }, "c", true, true)
+        end)
       end
     end,
 
@@ -89,8 +80,19 @@ function M.open(lang_key, opts)
         local src  = lex.cycle_source(lang_key)
         local item = picker.list:current()
         vim.notify(("lexicon source → %s"):format(src), vim.log.levels.INFO)
-        if item and picker.preview then
-          update_preview(vim.api.nvim_win_get_buf(picker.preview.win), item.word, src)
+        if item then
+          picker.preview:set_lines({ ("[%s]  fetching %q …"):format(src, item.word) })
+          local bufnr = picker.preview.win.buf
+          lex.fetch(item.word, src, function(lines)
+            if #lines == 0 then lines = { "no definition found: " .. item.word } end
+            lines[#lines + 1] = ""
+            lines[#lines + 1] = ("── %s ──"):format(src)
+            if vim.api.nvim_buf_is_valid(bufnr) then
+              vim.bo[bufnr].modifiable = true
+              vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, lines)
+              vim.bo[bufnr].modifiable = false
+            end
+          end)
         end
       end,
     },
@@ -104,11 +106,11 @@ function M.open(lang_key, opts)
   }, opts))
 end
 
--- Convenience wrappers per language, callable as M.en(), M.pt(), etc.
--- Generated at require-time from whatever languages are in config.
+-- Convenience wrappers per language: M.en(), M.pt(), M.de() …
+-- Generated at require-time from configured languages.
 for key in pairs(lex.config.languages) do
   local k = key
-  M[k] = function(opts) M.open(k, opts) end
+  M[k] = function(o) M.open(k, o) end
 end
 
 return M
