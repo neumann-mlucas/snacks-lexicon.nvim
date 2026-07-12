@@ -1,6 +1,39 @@
 local lex = require("lexicon")
 local M   = {}
 
+-- Format raw DICT protocol lines into cleaner display lines
+local function pretty(lines, word, src)
+  local out = {}
+  -- header: word + source
+  out[#out + 1] = ("  %s"):format(word:upper())
+  out[#out + 1] = ("  source: %s"):format(src)
+  out[#out + 1] = ""
+
+  for _, line in ipairs(lines) do
+    -- blank lines → preserve spacing
+    if line == "" then
+      out[#out + 1] = ""
+    -- definition number lines (e.g. "1. (n) cat --")
+    elseif line:match("^%s*%d+%.") then
+      out[#out + 1] = ""
+      out[#out + 1] = line
+    else
+      out[#out + 1] = line
+    end
+  end
+
+  return out
+end
+
+-- Write lines into a preview buffer, handling modifiable flag
+local function write_buf(bufnr, lines)
+  if not bufnr or bufnr == 0 or not vim.api.nvim_buf_is_valid(bufnr) then return end
+  vim.bo[bufnr].modifiable = true
+  vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, lines)
+  vim.bo[bufnr].modifiable = false
+  vim.bo[bufnr].filetype = "snacks_picker_preview"
+end
+
 --- Open a lexicon picker for lang_key.
 -- @param lang_key string|nil  e.g. "en", "pt", "de". Defaults to config.default_lang.
 -- @param opts     table|nil   Merged into Snacks.picker opts.
@@ -38,29 +71,44 @@ function M.open(lang_key, opts)
 
   Snacks.picker.pick(vim.tbl_extend("force", {
     source  = "lexicon_" .. lang_key,
-    title   = ("Lexicon  [%s]"):format(cfg.label),
+    title   = ("Lexicon [%s]"):format(cfg.label),
     pattern = vim.fn.expand("<cword>"),
-    layout  = { preview = "right" },
-    format  = "text",   -- items have no 'file' field; use text formatter
+    format  = "text",
     items   = items,
 
-    -- Async preview: fetch definition from dict.org
+    -- wider layout: preview takes 65% of horizontal space
+    layout = {
+      layout = {
+        box      = "horizontal",
+        width    = 0.92,
+        height   = 0.88,
+        border   = "rounded",
+        {
+          box    = "vertical",
+          border = true,
+          title  = "{title} {live} {flags}",
+          { win = "input", height = 1, border = "bottom" },
+          { win = "list",  border = "none" },
+        },
+        { win = "preview", title = "{preview}", border = true, width = 0.65 },
+      },
+    },
+
+    -- Async preview with pretty-print and source in title
     preview = function(ctx)
-      local word    = ctx.item.word
-      local src     = lex.current_source(lang_key)
-      local bufnr   = ctx.buf  -- capture now; preview may change item
-      ctx.preview:set_lines({ ("[%s]  fetching %q …"):format(src, word) })
+      local word  = ctx.item.word
+      local src   = lex.current_source(lang_key)
+      local bufnr = ctx.buf
+
+      ctx.preview:set_title(src)
+      ctx.preview:set_lines({ "", "  fetching…" })
 
       lex.fetch(word, src, function(lines)
-        if #lines == 0 then lines = { "no definition found: " .. word } end
-        lines[#lines + 1] = ""
-        lines[#lines + 1] = ("── %s ──"):format(src)
-        -- write to the captured buf; guard in case picker closed
-        if vim.api.nvim_buf_is_valid(bufnr) then
-          vim.bo[bufnr].modifiable = true
-          vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, lines)
-          vim.bo[bufnr].modifiable = false
-        end
+        local out = #lines == 0
+          and { "", "  no definition found: " .. word }
+          or pretty(lines, word, src)
+        write_buf(bufnr, out)
+        ctx.preview:set_title(src)
       end)
     end,
 
@@ -74,26 +122,25 @@ function M.open(lang_key, opts)
       end
     end,
 
-    -- <C-n>: cycle dict.org source, refresh preview in place
+    -- <C-n>: cycle dict.org source, refresh preview
     actions = {
       lexicon_cycle_source = function(picker)
         local src  = lex.cycle_source(lang_key)
         local item = picker.list:current()
         vim.notify(("lexicon source → %s"):format(src), vim.log.levels.INFO)
-        if item then
-          picker.preview:set_lines({ ("[%s]  fetching %q …"):format(src, item.word) })
-          local bufnr = picker.preview.win.buf
-          lex.fetch(item.word, src, function(lines)
-            if #lines == 0 then lines = { "no definition found: " .. item.word } end
-            lines[#lines + 1] = ""
-            lines[#lines + 1] = ("── %s ──"):format(src)
-            if vim.api.nvim_buf_is_valid(bufnr) then
-              vim.bo[bufnr].modifiable = true
-              vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, lines)
-              vim.bo[bufnr].modifiable = false
-            end
-          end)
-        end
+        if not item then return end
+
+        picker.preview:set_title(src)
+        picker.preview:set_lines({ "", "  fetching…" })
+        local bufnr = picker.preview.win.buf
+
+        lex.fetch(item.word, src, function(lines)
+          local out = #lines == 0
+            and { "", "  no definition found: " .. item.word }
+            or pretty(lines, item.word, src)
+          write_buf(bufnr, out)
+          picker.preview:set_title(src)
+        end)
       end,
     },
     win = {
@@ -107,7 +154,6 @@ function M.open(lang_key, opts)
 end
 
 -- Convenience wrappers per language: M.en(), M.pt(), M.de() …
--- Generated at require-time from configured languages.
 for key in pairs(lex.config.languages) do
   local k = key
   M[k] = function(o) M.open(k, o) end
