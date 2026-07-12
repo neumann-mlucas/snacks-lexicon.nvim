@@ -117,9 +117,10 @@ function M.words_file(lang_key)
 end
 
 --- Async definition fetch; on_lines called on vim main thread.
+-- @return { cancel = fun() }  cancels the in-flight request
 function M.fetch(word, database, on_lines)
   local proto = require("lexicon.protocol")
-  proto.define(
+  return proto.define(
     M.config.server,
     M.config.port,
     database,

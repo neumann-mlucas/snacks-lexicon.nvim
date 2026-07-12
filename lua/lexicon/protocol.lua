@@ -47,6 +47,7 @@ end
 -- @param word       string  word to look up (CRLF stripped for safety)
 -- @param timeout_ms number  milliseconds before giving up
 -- @param on_lines   fun(lines: string[])  called on vim main thread
+-- @return { cancel = fun() }  aborts in-flight request without invoking on_lines
 function M.define(server, port, database, word, timeout_ms, on_lines)
   -- Strip CRLF from word to prevent DICT command injection
   word = tostring(word or ""):gsub("[\r\n]", "")
@@ -61,15 +62,26 @@ function M.define(server, port, database, word, timeout_ms, on_lines)
     end
   end
 
-  local function finish(lines)
-    if done then return end
-    done = true
+  local function cleanup()
     safe_close(timer)
     if client then
       pcall(client.read_stop, client)
       safe_close(client)
+      client = nil
     end
+  end
+
+  local function finish(lines)
+    if done then return end
+    done = true
+    cleanup()
     vim.schedule(function() on_lines(lines or parse(buf)) end)
+  end
+
+  local function cancel()
+    if done then return end
+    done = true      -- prevent finish() from firing on_lines
+    cleanup()
   end
 
   timer = uv.new_timer()
@@ -110,6 +122,8 @@ function M.define(server, port, database, word, timeout_ms, on_lines)
 
     try(1)
   end)
+
+  return { cancel = cancel }
 end
 
 return M

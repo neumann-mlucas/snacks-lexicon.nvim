@@ -1,6 +1,7 @@
-local lex = require("lexicon")
-local uv  = vim.uv or vim.loop
-local M   = {}
+local lex   = require("lexicon")
+local cache = require("lexicon.cache")
+local uv    = vim.uv or vim.loop
+local M     = {}
 
 -- Module-level cache of word lists keyed by absolute file path.
 -- Avoids re-reading /usr/share/dict/words (~200k lines, ~100ms) on every open.
@@ -108,10 +109,12 @@ function M.open(lang_key, opts)
 
   local items = load_words(wf)
 
-  -- Per-picker state: request generation counter + debounce timer.
-  -- Callbacks from stale fetches (req_id != state.gen) are discarded so
-  -- fast cursor movement never overwrites a newer preview.
-  local state = { gen = 0, timer = nil }
+  -- Per-picker state: request generation counter, debounce timer, active fetch.
+  -- gen: incremented on each schedule_fetch call. Stale callbacks (my_gen != gen)
+  --   are discarded so fast cursor movement never overwrites a newer preview.
+  -- timer: pending debounce timer, cancelled when a new preview starts.
+  -- fetch: in-flight protocol handle, cancelled to close TCP early.
+  local state = { gen = 0, timer = nil, fetch = nil }
 
   local function cancel_timer()
     if state.timer and not state.timer:is_closing() then
@@ -121,13 +124,29 @@ function M.open(lang_key, opts)
     state.timer = nil
   end
 
+  local function cancel_fetch()
+    if state.fetch then
+      pcall(state.fetch.cancel)
+      state.fetch = nil
+    end
+  end
+
   -- Fire an async preview fetch after a short debounce.
   local function schedule_fetch(word, src, pwin, bufnr)
     state.gen = state.gen + 1
     local my_gen = state.gen
     cancel_timer()
+    cancel_fetch()
 
     set_title(pwin, src)
+
+    -- Cache hit: render immediately, skip debounce and network entirely.
+    local hit = cache.get(word, src)
+    if hit then
+      write_buf(bufnr, pretty(hit, word, src))
+      return
+    end
+
     write_buf(bufnr, { "", "  fetching…" })
 
     state.timer = uv.new_timer()
@@ -135,12 +154,16 @@ function M.open(lang_key, opts)
       cancel_timer()
       if state.gen ~= my_gen then return end
 
-      lex.fetch(word, src, function(lines)
+      state.fetch = lex.fetch(word, src, function(lines)
+        state.fetch = nil
         if state.gen ~= my_gen then return end  -- newer preview took over
-        local out = #lines == 0
-          and { "", "  no definition found: " .. word }
-          or pretty(lines, word, src)
-        write_buf(bufnr, out)
+
+        if #lines == 0 then
+          write_buf(bufnr, { "", "  no definition found: " .. word })
+        else
+          cache.set(word, src, lines)
+          write_buf(bufnr, pretty(lines, word, src))
+        end
         set_title(pwin, src)
       end)
     end))
@@ -214,7 +237,10 @@ function M.open(lang_key, opts)
       },
     },
 
-    on_close = cancel_timer,
+    on_close = function()
+      cancel_timer()
+      cancel_fetch()
+    end,
   }, opts))
 end
 

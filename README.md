@@ -45,13 +45,22 @@ Dictionary and thesaurus lookup via [dict.org](https://dict.org) DICT protocol, 
 
 ## Keybindings
 
-| Key     | Action                                    |
-|---------|-------------------------------------------|
-| `<C-n>` | Cycle to next dictionary source           |
-| `<CR>`  | Insert selected word at cursor position   |
-| `<Esc>` | Close picker                              |
+| Key     | Action                                  |
+| ------- | --------------------------------------- |
+| `<C-n>` | Cycle to next dictionary source         |
+| `<C-p>` | Cycle to previous dictionary source     |
+| `<CR>`  | Insert selected word at cursor position |
+| `<Esc>` | Close picker                            |
 
 Source cycle order (English): `wn → moby-thesaurus → gcide → foldoc → jargon → …`
+
+## Commands
+
+| Command          | Action                                       |
+| ---------------- | -------------------------------------------- |
+| `:Lexicon`       | Open picker for the configured default language |
+| `:Lexicon <lang>`| Open picker for `<lang>` (tab-completed)     |
+| `:checkhealth lexicon` | Verify snacks, word files, DNS         |
 
 ## Configuration
 
@@ -117,10 +126,13 @@ require("lexicon.picker").en({ default_source = "moby-thesaurus" })
 ## Architecture
 
 ```
+plugin/lexicon.lua   :Lexicon user command with completion
 lua/lexicon/
-├── protocol.lua   DICT protocol client over raw TCP (vim.uv)
-├── init.lua       Config, language profiles, source cycle state, fetch()
-└── picker.lua     snacks.picker integration: word list, preview, keymaps
+├── protocol.lua     DICT protocol client over raw TCP (vim.uv)
+├── init.lua         Config, language profiles, source cycle state, fetch()
+├── cache.lua        Bounded LRU cache for fetched definitions
+├── health.lua       :checkhealth lexicon
+└── picker.lua       snacks.picker integration: word list, preview, keymaps
 ```
 
 **`protocol.lua`** — resolves hostname via `uv.getaddrinfo`, opens a TCP connection, sends `DEFINE <database> <word>`, parses RFC 2229 response codes, calls `on_lines` on the vim main thread.
@@ -133,18 +145,18 @@ lua/lexicon/
 
 Common sources available on dict.org:
 
-| Source          | Content                        |
-|-----------------|--------------------------------|
-| `wn`            | WordNet 3.1                    |
-| `moby-thesaurus`| Moby Thesaurus                 |
-| `gcide`         | Collaborative Int'l Dictionary |
-| `foldoc`        | Free On-line Dict of Computing |
-| `jargon`        | Jargon File                    |
-| `fd-eng-por`    | English → Português            |
-| `fd-eng-deu`    | English → Deutsch              |
-| `fd-eng-spa`    | English → Español              |
-| `fd-eng-fra`    | English → Français             |
-| `fd-por-eng`    | Português → English            |
-| `fd-deu-eng`    | Deutsch → English              |
+| Source           | Content                        |
+| ---------------- | ------------------------------ |
+| `wn`             | WordNet 3.1                    |
+| `moby-thesaurus` | Moby Thesaurus                 |
+| `gcide`          | Collaborative Int'l Dictionary |
+| `foldoc`         | Free On-line Dict of Computing |
+| `jargon`         | Jargon File                    |
+| `fd-eng-por`     | English → Português            |
+| `fd-eng-deu`     | English → Deutsch              |
+| `fd-eng-spa`     | English → Español              |
+| `fd-eng-fra`     | English → Français             |
+| `fd-por-eng`     | Português → English            |
+| `fd-deu-eng`     | Deutsch → English              |
 
 Full list: `telnet dict.org 2628` then `SHOW DB`.
