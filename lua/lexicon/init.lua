@@ -5,7 +5,7 @@ local LANG_DEFAULTS = {
     label      = "English",
     sources    = { "wn", "moby-thesaurus", "gcide", "foldoc", "jargon" },
     word_files = {
-      "/usr/share/dict/words",  -- Linux / macOS
+      "/usr/share/dict/words",   -- Linux / macOS
       "/usr/dict/words",
       "C:/tools/dict/words.txt", -- Windows (user-supplied)
     },
@@ -16,16 +16,13 @@ local LANG_DEFAULTS = {
     word_files = {
       "/usr/share/dict/portuguese",
       "/usr/share/dict/pt_PT",
-      "/usr/share/dict/words",   -- fallback: English list still usable
+      "/usr/share/dict/words",
     },
   },
   de = {
     label      = "Deutsch",
     sources    = { "fd-deu-eng", "fd-eng-deu" },
-    word_files = {
-      "/usr/share/dict/german",
-      "/usr/share/dict/ngerman",
-    },
+    word_files = { "/usr/share/dict/german", "/usr/share/dict/ngerman" },
   },
   es = {
     label      = "Español",
@@ -47,17 +44,19 @@ M.config = {
   languages    = LANG_DEFAULTS,
 }
 
-M._state = { lang = "en", source_idx = 1 }
+M._state = { source_idx = 1 }
 
 --- Merge user config. Call once from plugin setup.
 -- @param opts table  keys: server, port, timeout_ms, default_lang, languages
 function M.setup(opts)
   opts = opts or {}
 
-  -- languages are merged per-entry, not deep-replaced wholesale
-  local lang_overrides = opts.languages
-  opts.languages = nil
-  M.config = vim.tbl_deep_extend("force", M.config, opts)
+  -- Copy so we don't mutate caller's table
+  local base_opts = vim.deepcopy(opts)
+  local lang_overrides = base_opts.languages
+  base_opts.languages = nil
+
+  M.config = vim.tbl_deep_extend("force", M.config, base_opts)
 
   if lang_overrides then
     for key, override in pairs(lang_overrides) do
@@ -66,13 +65,12 @@ function M.setup(opts)
     end
   end
 
-  M._state.lang       = M.config.default_lang
   M._state.source_idx = 1
 end
 
 --- Return language config table for lang_key (falls back to default_lang).
 function M.lang_cfg(lang_key)
-  return M.config.languages[lang_key or M._state.lang]
+  return M.config.languages[lang_key or M.config.default_lang]
       or M.config.languages[M.config.default_lang]
 end
 
@@ -89,10 +87,32 @@ function M.cycle_source(lang_key)
   return M.current_source(lang_key)
 end
 
+--- Step to previous source; returns new source name.
+function M.cycle_source_prev(lang_key)
+  local n = #M.lang_cfg(lang_key).sources
+  M._state.source_idx = ((M._state.source_idx - 2) % n) + 1
+  return M.current_source(lang_key)
+end
+
+--- Try to set the current source by exact name; returns true if found.
+function M.set_source(lang_key, name)
+  local sources = M.lang_cfg(lang_key).sources
+  for i, s in ipairs(sources) do
+    if s == name then
+      M._state.source_idx = i
+      return true
+    end
+  end
+  return false
+end
+
 --- First readable word-list file for lang_key, or nil.
 function M.words_file(lang_key)
   for _, p in ipairs(M.lang_cfg(lang_key).word_files or {}) do
-    if vim.fn.filereadable(p) == 1 then return p end
+    local expanded = vim.fn.expand(p)
+    if vim.fn.filereadable(expanded) == 1 then
+      return expanded
+    end
   end
 end
 

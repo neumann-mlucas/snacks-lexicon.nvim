@@ -2,6 +2,8 @@
 
 Dictionary and thesaurus lookup via [dict.org](https://dict.org) DICT protocol, powered by [snacks.picker](https://github.com/folke/snacks.nvim).
 
+**This is a vibe-coded project and is still experimental. Use it at your own discretion.**
+
 - Fuzzy search over your system word list (`/usr/share/dict/words`)
 - Live definition preview fetched asynchronously from dict.org
 - Cycle through multiple dictionary sources (`wn`, `moby-thesaurus`, `gcide`, …)

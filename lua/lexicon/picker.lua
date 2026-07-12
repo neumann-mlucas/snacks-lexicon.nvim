@@ -1,10 +1,19 @@
 local lex = require("lexicon")
+local uv  = vim.uv or vim.loop
 local M   = {}
 
--- Format raw DICT protocol lines into cleaner display lines
+-- Module-level cache of word lists keyed by absolute file path.
+-- Avoids re-reading /usr/share/dict/words (~200k lines, ~100ms) on every open.
+local WORD_CACHE = {}
+
+-- Debounce delay before firing a dict.org lookup on preview change.
+-- Prevents flooding the server when the user scrolls fast.
+local DEBOUNCE_MS = 150
+
+-- Format raw DICT protocol lines into cleaner display lines.
 local function pretty(lines, word, src)
   local out = {}
-  out[#out + 1] = ("  %s"):format(word:upper())
+  out[#out + 1] = ("  %s"):format(vim.fn.toupper(word))
   out[#out + 1] = ("  source: %s"):format(src)
   out[#out + 1] = ""
 
@@ -18,11 +27,10 @@ local function pretty(lines, word, src)
       out[#out + 1] = line
     end
   end
-
   return out
 end
 
--- Write lines into a preview buffer; modifiable guard, no filetype touch
+-- Write lines into a preview buffer; toggles modifiable guard.
 local function write_buf(bufnr, lines)
   if not bufnr or bufnr == 0 or not vim.api.nvim_buf_is_valid(bufnr) then return end
   vim.bo[bufnr].modifiable = true
@@ -30,9 +38,35 @@ local function write_buf(bufnr, lines)
   vim.bo[bufnr].modifiable = false
 end
 
--- Safe title update: no-op if window is already closed
+-- Safely update window title (no-op if window is gone).
 local function set_title(win, title)
   pcall(function() win:set_title(title) end)
+end
+
+-- Load a word file into snacks picker item format, with case-insensitive
+-- ordinal for search matching. Cached per path.
+local function load_words(path)
+  if WORD_CACHE[path] then return WORD_CACHE[path] end
+  local items = {}
+  for line in io.lines(path) do
+    if line ~= "" then
+      items[#items + 1] = {
+        text    = line,        -- shown in the list
+        word    = line,        -- inserted on <CR>
+        ordinal = line:lower(),-- used by matcher for fuzzy filtering
+      }
+    end
+  end
+  WORD_CACHE[path] = items
+  return items
+end
+
+-- Resolve the snacks.picker.pick function. Handles the case where snacks
+-- is loaded but the global is not exposed yet.
+local function get_pick()
+  if _G.Snacks and _G.Snacks.picker then return _G.Snacks.picker.pick end
+  local ok, snacks = pcall(require, "snacks")
+  if ok and snacks and snacks.picker then return snacks.picker.pick end
 end
 
 --- Open a lexicon picker for lang_key.
@@ -53,27 +87,73 @@ function M.open(lang_key, opts)
     return
   end
 
-  -- reset source cycle; honour caller's default_source if given
+  local pick = get_pick()
+  if not pick then
+    vim.notify("snacks-lexicon: snacks.nvim with picker enabled is required", vim.log.levels.ERROR)
+    return
+  end
+
+  -- Reset source cycle; honour caller's default_source if valid.
   lex._state.source_idx = 1
   if opts.default_source then
-    for i, s in ipairs(cfg.sources) do
-      if s == opts.default_source then lex._state.source_idx = i; break end
+    local ok = lex.set_source(lang_key, opts.default_source)
+    if not ok then
+      vim.notify(
+        ("snacks-lexicon: unknown source %q for lang %q"):format(opts.default_source, lang_key),
+        vim.log.levels.WARN
+      )
     end
     opts.default_source = nil
   end
 
-  -- load word list (~100ms for 200k words)
-  local items = {}
-  for line in io.lines(wf) do
-    if line ~= "" then
-      items[#items + 1] = { text = line, word = line }
+  local items = load_words(wf)
+
+  -- Per-picker state: request generation counter + debounce timer.
+  -- Callbacks from stale fetches (req_id != state.gen) are discarded so
+  -- fast cursor movement never overwrites a newer preview.
+  local state = { gen = 0, timer = nil }
+
+  local function cancel_timer()
+    if state.timer and not state.timer:is_closing() then
+      pcall(state.timer.stop, state.timer)
+      pcall(state.timer.close, state.timer)
     end
+    state.timer = nil
   end
 
-  Snacks.picker.pick(vim.tbl_extend("force", {
+  -- Fire an async preview fetch after a short debounce.
+  local function schedule_fetch(word, src, pwin, bufnr)
+    state.gen = state.gen + 1
+    local my_gen = state.gen
+    cancel_timer()
+
+    set_title(pwin, src)
+    write_buf(bufnr, { "", "  fetching…" })
+
+    state.timer = uv.new_timer()
+    state.timer:start(DEBOUNCE_MS, 0, vim.schedule_wrap(function()
+      cancel_timer()
+      if state.gen ~= my_gen then return end
+
+      lex.fetch(word, src, function(lines)
+        if state.gen ~= my_gen then return end  -- newer preview took over
+        local out = #lines == 0
+          and { "", "  no definition found: " .. word }
+          or pretty(lines, word, src)
+        write_buf(bufnr, out)
+        set_title(pwin, src)
+      end)
+    end))
+  end
+
+  -- Lowercase the seed pattern so <cword>="House" matches word list "house"
+  -- (snacks smartcase treats mixed-case patterns as case-sensitive).
+  local seed = vim.fn.tolower(vim.fn.expand("<cword>") or "")
+
+  pick(vim.tbl_extend("force", {
     source  = "lexicon_" .. lang_key,
     title   = ("Lexicon [%s]"):format(cfg.label),
-    pattern = vim.fn.expand("<cword>"),
+    pattern = seed,
     format  = "text",
     items   = items,
 
@@ -95,20 +175,12 @@ function M.open(lang_key, opts)
     },
 
     preview = function(ctx)
-      local word = ctx.item.word
-      local src  = lex.current_source(lang_key)
-      local bufnr = ctx.buf
-      local pwin  = ctx.preview.win
-
-      set_title(pwin, src)
-      ctx.preview:set_lines({ "", "  fetching…" })
-
-      lex.fetch(word, src, function(lines)
-        write_buf(bufnr, #lines == 0
-          and { "", "  no definition found: " .. word }
-          or pretty(lines, word, src))
-        set_title(pwin, src)
-      end)
+      schedule_fetch(
+        ctx.item.word,
+        lex.current_source(lang_key),
+        ctx.preview.win,
+        ctx.buf
+      )
     end,
 
     confirm = function(picker, item)
@@ -122,22 +194,14 @@ function M.open(lang_key, opts)
 
     actions = {
       lexicon_cycle_source = function(picker)
-        local src  = lex.cycle_source(lang_key)
         local item = picker.list:current()
         if not item then return end
-
-        local pwin  = picker.preview.win
-        local bufnr = pwin.buf
-
-        set_title(pwin, src)
-        picker.preview:set_lines({ "", "  fetching…" })
-
-        lex.fetch(item.word, src, function(lines)
-          write_buf(bufnr, #lines == 0
-            and { "", "  no definition found: " .. item.word }
-            or pretty(lines, item.word, src))
-          set_title(pwin, src)
-        end)
+        schedule_fetch(item.word, lex.cycle_source(lang_key), picker.preview.win, picker.preview.win.buf)
+      end,
+      lexicon_prev_source = function(picker)
+        local item = picker.list:current()
+        if not item then return end
+        schedule_fetch(item.word, lex.cycle_source_prev(lang_key), picker.preview.win, picker.preview.win.buf)
       end,
     },
 
@@ -145,16 +209,21 @@ function M.open(lang_key, opts)
       input = {
         keys = {
           ["<C-n>"] = { "lexicon_cycle_source", mode = { "i", "n" } },
+          ["<C-p>"] = { "lexicon_prev_source",  mode = { "i", "n" } },
         },
       },
     },
+
+    on_close = cancel_timer,
   }, opts))
 end
 
--- Convenience wrappers per language: M.en(), M.pt(), M.de() …
-for key in pairs(lex.config.languages) do
-  local k = key
-  M[k] = function(o) M.open(k, o) end
-end
-
-return M
+-- Convenience wrappers per language. Resolved lazily via metatable so
+-- languages added *after* first require() still work.
+return setmetatable(M, {
+  __index = function(_, k)
+    if type(k) == "string" and lex.config.languages[k] then
+      return function(o) M.open(k, o) end
+    end
+  end,
+})
