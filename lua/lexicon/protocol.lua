@@ -40,6 +40,12 @@ local function response_complete(buf)
   return buf:find("\n221[ \r]") ~= nil or buf:find("^221[ \r]") ~= nil
 end
 
+-- Quote a DICT protocol atom per RFC 2229: wrap in `"`, backslash-escape
+-- interior `\` and `"`. Necessary for words with spaces, apostrophes, etc.
+local function dict_quote(s)
+  return '"' .. tostring(s):gsub("\\", "\\\\"):gsub('"', '\\"') .. '"'
+end
+
 --- Fetch a definition via the DICT protocol.
 -- @param server     string  hostname or IP
 -- @param port       number  usually 2628
@@ -49,7 +55,7 @@ end
 -- @param on_lines   fun(lines: string[])  called on vim main thread
 -- @return { cancel = fun() }  aborts in-flight request without invoking on_lines
 function M.define(server, port, database, word, timeout_ms, on_lines)
-  -- Strip CRLF from word to prevent DICT command injection
+  -- Strip CRLF; RFC quoting handles everything else
   word = tostring(word or ""):gsub("[\r\n]", "")
   database = tostring(database or ""):gsub("[\r\n]", "")
 
@@ -107,7 +113,8 @@ function M.define(server, port, database, word, timeout_ms, on_lines)
           return
         end
 
-        local cmd = ("CLIENT nvim-lexicon\r\nDEFINE %s %s\r\nQUIT\r\n"):format(database, word)
+        local cmd = ("CLIENT nvim-lexicon\r\nDEFINE %s %s\r\nQUIT\r\n"):format(
+          dict_quote(database), dict_quote(word))
         client:write(cmd, function(werr)
           if werr then finish({}) end
         end)

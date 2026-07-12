@@ -31,17 +31,35 @@ local function pretty(lines, word, src)
   return out
 end
 
--- Write lines into a preview buffer; toggles modifiable guard.
-local function write_buf(bufnr, lines)
-  if not bufnr or bufnr == 0 or not vim.api.nvim_buf_is_valid(bufnr) then return end
-  vim.bo[bufnr].modifiable = true
-  vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, lines)
-  vim.bo[bufnr].modifiable = false
+-- Write lines through the snacks preview object.
+-- Preview manages its own buffer swaps; using preview:set_lines() ensures
+-- we always target the buffer that is currently visible in the window.
+local function write_lines(preview, lines)
+  if not preview then return end
+  local ok = pcall(function() preview:set_lines(lines) end)
+  if ok then return end
+  -- Fallback: direct buffer write (in case preview API is unavailable)
+  local buf = preview.win and preview.win.buf
+  if buf and vim.api.nvim_buf_is_valid(buf) then
+    vim.bo[buf].modifiable = true
+    vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
+    vim.bo[buf].modifiable = false
+  end
 end
 
 -- Safely update window title (no-op if window is gone).
 local function set_title(win, title)
   pcall(function() win:set_title(title) end)
+end
+
+-- Return a lowercased seed from <cword> if it looks like a real word.
+-- Rejects symbols/operators such as `->`, `!=` that would produce zero matches.
+local function seed_pattern()
+  local cword = vim.fn.expand("<cword>") or ""
+  if cword:match("^[%w%-]+$") then
+    return vim.fn.tolower(cword)
+  end
+  return ""
 end
 
 -- Load a word file into snacks picker item format, with case-insensitive
@@ -108,6 +126,13 @@ function M.open(lang_key, opts)
   end
 
   local items = load_words(wf)
+  if #items == 0 then
+    vim.notify(
+      ("snacks-lexicon: word file is empty: %s"):format(wf),
+      vim.log.levels.WARN
+    )
+    return
+  end
 
   -- Per-picker state: request generation counter, debounce timer, active fetch.
   -- gen: incremented on each schedule_fetch call. Stale callbacks (my_gen != gen)
@@ -131,23 +156,34 @@ function M.open(lang_key, opts)
     end
   end
 
+  -- Render either the definition or a "no definition" placeholder.
+  local function render(preview, word, src, lines)
+    if #lines == 0 then
+      write_lines(preview, { "", "  no definition found: " .. word })
+    else
+      write_lines(preview, pretty(lines, word, src))
+    end
+    if preview and preview.win then set_title(preview.win, src) end
+  end
+
   -- Fire an async preview fetch after a short debounce.
-  local function schedule_fetch(word, src, pwin, bufnr)
+  local function schedule_fetch(preview, word, src)
     state.gen = state.gen + 1
     local my_gen = state.gen
     cancel_timer()
     cancel_fetch()
 
-    set_title(pwin, src)
+    if preview and preview.win then set_title(preview.win, src) end
 
     -- Cache hit: render immediately, skip debounce and network entirely.
+    -- Empty tables ARE cached (negative cache) → same fast path for misses.
     local hit = cache.get(word, src)
     if hit then
-      write_buf(bufnr, pretty(hit, word, src))
+      render(preview, word, src, hit)
       return
     end
 
-    write_buf(bufnr, { "", "  fetching…" })
+    write_lines(preview, { "", "  fetching…" })
 
     state.timer = uv.new_timer()
     state.timer:start(DEBOUNCE_MS, 0, vim.schedule_wrap(function()
@@ -158,25 +194,16 @@ function M.open(lang_key, opts)
         state.fetch = nil
         if state.gen ~= my_gen then return end  -- newer preview took over
 
-        if #lines == 0 then
-          write_buf(bufnr, { "", "  no definition found: " .. word })
-        else
-          cache.set(word, src, lines)
-          write_buf(bufnr, pretty(lines, word, src))
-        end
-        set_title(pwin, src)
+        cache.set(word, src, lines)  -- cache even empty results to avoid re-hits
+        render(preview, word, src, lines)
       end)
     end))
   end
 
-  -- Lowercase the seed pattern so <cword>="House" matches word list "house"
-  -- (snacks smartcase treats mixed-case patterns as case-sensitive).
-  local seed = vim.fn.tolower(vim.fn.expand("<cword>") or "")
-
   pick(vim.tbl_extend("force", {
     source  = "lexicon_" .. lang_key,
     title   = ("Lexicon [%s]"):format(cfg.label),
-    pattern = seed,
+    pattern = seed_pattern(),
     format  = "text",
     items   = items,
 
@@ -198,12 +225,7 @@ function M.open(lang_key, opts)
     },
 
     preview = function(ctx)
-      schedule_fetch(
-        ctx.item.word,
-        lex.current_source(lang_key),
-        ctx.preview.win,
-        ctx.buf
-      )
+      schedule_fetch(ctx.preview, ctx.item.word, lex.current_source(lang_key))
     end,
 
     confirm = function(picker, item)
@@ -219,12 +241,12 @@ function M.open(lang_key, opts)
       lexicon_cycle_source = function(picker)
         local item = picker.list:current()
         if not item then return end
-        schedule_fetch(item.word, lex.cycle_source(lang_key), picker.preview.win, picker.preview.win.buf)
+        schedule_fetch(picker.preview, item.word, lex.cycle_source(lang_key))
       end,
       lexicon_prev_source = function(picker)
         local item = picker.list:current()
         if not item then return end
-        schedule_fetch(item.word, lex.cycle_source_prev(lang_key), picker.preview.win, picker.preview.win.buf)
+        schedule_fetch(picker.preview, item.word, lex.cycle_source_prev(lang_key))
       end,
     },
 
