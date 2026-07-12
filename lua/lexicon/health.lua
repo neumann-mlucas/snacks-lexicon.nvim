@@ -1,8 +1,11 @@
 local M = {}
 
 local function has_snacks_picker()
+  if _G.Snacks and _G.Snacks.picker and type(_G.Snacks.picker.pick) == "function" then
+    return true
+  end
   local ok, snacks = pcall(require, "snacks")
-  return ok and snacks and snacks.picker ~= nil
+  return ok and snacks and snacks.picker and type(snacks.picker.pick) == "function"
 end
 
 local function dns_ok(host, timeout_ms)

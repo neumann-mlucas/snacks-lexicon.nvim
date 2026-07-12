@@ -17,6 +17,15 @@ Dictionary and thesaurus lookup via [dict.org](https://dict.org) DICT protocol, 
 - System word list (e.g. `/usr/share/dict/words`) for the word finder
 - Internet access to dict.org
 
+On Windows there is no default word list path; download one (e.g. SCOWL,
+`words.txt` from wordnik/wordlist) and point `word_files` at it via config:
+
+```lua
+opts = {
+  languages = { en = { word_files = { "C:/tools/dict/words.txt" } } },
+}
+```
+
 ## Installation
 
 ```lua

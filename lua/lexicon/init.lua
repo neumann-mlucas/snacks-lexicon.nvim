@@ -5,9 +5,8 @@ local LANG_DEFAULTS = {
     label      = "English",
     sources    = { "wn", "moby-thesaurus", "gcide", "foldoc", "jargon" },
     word_files = {
-      "/usr/share/dict/words",   -- Linux / macOS
-      "/usr/dict/words",
-      "C:/tools/dict/words.txt", -- Windows (user-supplied)
+      "/usr/share/dict/words",  -- Linux
+      "/usr/dict/words",        -- older BSD/macOS
     },
   },
   pt = {

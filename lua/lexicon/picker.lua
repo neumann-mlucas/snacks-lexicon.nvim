@@ -200,6 +200,14 @@ function M.open(lang_key, opts)
     end))
   end
 
+  -- Only these opts may be overridden by callers. Prevents accidents like
+  -- passing `items` or `preview` from a user config wiping out core wiring.
+  local ALLOWED = { pattern = true, title = true, layout = true, on_close = true }
+  local user = {}
+  for k, v in pairs(opts) do
+    if ALLOWED[k] then user[k] = v end
+  end
+
   pick(vim.tbl_extend("force", {
     source  = "lexicon_" .. lang_key,
     title   = ("Lexicon [%s]"):format(cfg.label),
@@ -263,7 +271,7 @@ function M.open(lang_key, opts)
       cancel_timer()
       cancel_fetch()
     end,
-  }, opts))
+  }, user))
 end
 
 -- Convenience wrappers per language. Resolved lazily via metatable so
