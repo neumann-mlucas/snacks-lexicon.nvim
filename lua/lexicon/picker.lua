@@ -429,6 +429,18 @@ function M.open(lang_key, opts)
           ["<C-a>"] = { "lexicon_toggle_parallel", mode = { "i", "n" } },
         },
       },
+      preview = {
+        wo = {
+          number         = false,
+          relativenumber = false,
+          signcolumn     = "no",
+          wrap           = true,
+          linebreak      = true,
+          breakindent    = true,
+          list           = false,
+          cursorline     = false,
+        },
+      },
     },
 
     on_close = function()
