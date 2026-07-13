@@ -109,6 +109,12 @@ Provider modes~
     - "cli":      shells out to `dict(1)`. Works offline against a local
                   `dictd` server; automatically falls back to "dict.org" if
                   the `dict` binary is not on $PATH.
+    - "sdcv":     shells out to `sdcv(1)` (StarDict Console Version). Fully
+                  offline, huge dictionary catalogue at freemdict.com and
+                  huzheng.org. Falls back to "dict.org" if `sdcv` missing.
+                  `sources` under this provider must be the exact StarDict
+                  bookname strings — run `sdcv -l` or `:checkhealth lexicon`
+                  to list them.
 
 Local dictd~
     When `provider = "cli"` and a local dictd server is running, the `dict`

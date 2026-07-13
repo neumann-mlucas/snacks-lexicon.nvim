@@ -43,7 +43,7 @@ M.config = {
   languages = LANG_DEFAULTS,
   parallel = false, -- true → preview fetches all sources at once
   suggest = true, -- true → MATCH ... on empty define result
-  provider = "dict.org", -- "dict.org" (TCP) | "cli" (dict binary, works offline)
+  provider = "dict.org", -- "dict.org" (TCP) | "cli" (dict binary, offline) | "sdcv" (StarDict)
 }
 
 -- Per-language cursor into cfg.sources so switching languages does not
@@ -137,13 +137,16 @@ function M.words_file(lang_key)
 end
 
 -- Pick the transport implementation based on `config.provider`.
--- Falls back to network if CLI selected but `dict` is not on PATH.
+-- Falls back to network when the selected local backend's binary is missing.
 local function provider()
-  if M.config.provider == "cli" then
+  local p = M.config.provider
+  if p == "sdcv" then
+    local sdcv = require("lexicon.sdcv")
+    if sdcv.available() then return sdcv end
+    vim.notify("lexicon: config.provider='sdcv' but `sdcv` not found; falling back to network", vim.log.levels.WARN)
+  elseif p == "cli" then
     local cli = require("lexicon.cli")
-    if cli.available() then
-      return cli
-    end
+    if cli.available() then return cli end
     vim.notify("lexicon: config.provider='cli' but `dict` not found; falling back to network", vim.log.levels.WARN)
   end
   return require("lexicon.protocol")

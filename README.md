@@ -148,10 +148,53 @@ Source cycle order (English): `wn → moby-thesaurus → gcide → foldoc → ja
 
 ## Provider
 
-Two backends are supported via `opts.provider`:
+Three backends are supported via `opts.provider`:
 
 - `"dict.org"` (default): native `vim.uv` TCP client to a DICT server. Requires network.
 - `"cli"`: shells out to the `dict` binary. Works offline against a local `dictd` server, or online via `/etc/dict.conf`. Falls back to the network provider if `dict` is not on `PATH`.
+- `"sdcv"`: shells out to `sdcv` (StarDict Console Version). Fully offline, huge ecosystem of dictionaries at [freemdict.com](https://freemdict.com) and [huzheng.org](http://download.huzheng.org/). Falls back to the network provider if `sdcv` is not on `PATH`.
+
+### StarDict / sdcv
+
+The `sdcv` provider unlocks the StarDict ecosystem — hundreds of dictionaries
+including monolingual Oxford/Longman-style, specialised (medical, legal),
+and per-language sets that aren't in FreeDict.
+
+**Install:**
+```
+sudo pacman -S sdcv     # Arch
+sudo apt   install sdcv # Debian / Ubuntu
+brew        install sdcv # macOS
+```
+
+**Get dictionaries:** download `.tar.bz2` bundles from
+[freemdict.com](https://freemdict.com) or [huzheng.org](http://download.huzheng.org/dict.php),
+extract into `~/.stardict/dic/` (or `/usr/share/stardict/dic/`). Each dict
+is a folder containing `.ifo`, `.idx`, `.dict[.dz]` files.
+
+**Discover installed dicts:**
+```
+sdcv -l
+```
+
+**Configure:** use the *bookname* string (from `sdcv -l`, exactly as printed)
+in the `sources` list:
+```lua
+require("lexicon").setup({
+  provider = "sdcv",
+  languages = {
+    en = {
+      sources = {
+        "Oxford Advanced Learner's Dictionary 8th Edition",
+        "Merriam-Webster Collegiate Thesaurus",
+      },
+    },
+  },
+})
+```
+
+`:checkhealth lexicon` prints the full list of detected booknames so you
+can copy them verbatim.
 
 ## Configuration
 

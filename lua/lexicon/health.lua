@@ -62,6 +62,28 @@ function M.check()
         { "Install `dictd`/`dict` (Debian/Ubuntu) or `dict-client` (Arch)" }
       )
     end
+  elseif lex.config.provider == "sdcv" then
+    local sdcv = require("lexicon.sdcv")
+    if sdcv.available() then
+      vim.health.ok("`sdcv` binary found on PATH")
+      local dicts = sdcv.list_dicts()
+      if #dicts == 0 then
+        vim.health.warn("`sdcv` installed but no StarDict dictionaries found", {
+          "Drop dictionaries into ~/.stardict/dic/ or /usr/share/stardict/dic/",
+          "Sources: https://freemdict.com  or  http://download.huzheng.org/",
+        })
+      else
+        vim.health.info(("installed dictionaries (%d):"):format(#dicts))
+        for _, d in ipairs(dicts) do
+          vim.health.info("  " .. d)
+        end
+      end
+    else
+      vim.health.error(
+        "config.provider='sdcv' but `sdcv` not installed",
+        { "Install: pacman -S sdcv  |  apt install sdcv  |  brew install sdcv" }
+      )
+    end
   end
 
   vim.health.start("snacks-lexicon: server")
