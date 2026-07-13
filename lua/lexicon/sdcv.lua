@@ -8,7 +8,7 @@
 --   sdcv -0 <word>                  match list (no definitions)
 --   sdcv -l                         list installed dictionaries
 local uv = vim.uv or vim.loop
-local M  = {}
+local M = {}
 
 local function run(argv, timeout_ms, on_output)
   local stdout = uv.new_pipe(false)
@@ -17,13 +17,19 @@ local function run(argv, timeout_ms, on_output)
   local buf_out, buf_err, done = {}, {}, false
 
   local function safe_close(h)
-    if h and not h:is_closing() then pcall(h.close, h) end
+    if h and not h:is_closing() then
+      pcall(h.close, h)
+    end
   end
 
   local function finish(exit_code)
-    if done then return end
+    if done then
+      return
+    end
     done = true
-    safe_close(stdout); safe_close(stderr); safe_close(handle)
+    safe_close(stdout)
+    safe_close(stderr)
+    safe_close(handle)
     vim.schedule(function()
       on_output(buf_out, buf_err, exit_code)
     end)
@@ -36,7 +42,7 @@ local function run(argv, timeout_ms, on_output)
   end)
 
   handle = uv.spawn(argv[1], {
-    args  = { unpack(argv, 2) },
+    args = { unpack(argv, 2) },
     stdio = { nil, stdout, stderr },
   }, function(code)
     safe_close(timer)
@@ -44,27 +50,41 @@ local function run(argv, timeout_ms, on_output)
   end)
 
   if not handle then
-    safe_close(timer); safe_close(stdout); safe_close(stderr)
-    vim.schedule(function() on_output({}, {}, -1) end)
+    safe_close(timer)
+    safe_close(stdout)
+    safe_close(stderr)
+    vim.schedule(function()
+      on_output({}, {}, -1)
+    end)
     return { cancel = function() end }
   end
 
   stdout:read_start(function(err, data)
-    if err or not data then return end
+    if err or not data then
+      return
+    end
     buf_out[#buf_out + 1] = data
   end)
   stderr:read_start(function(err, data)
-    if err or not data then return end
+    if err or not data then
+      return
+    end
     buf_err[#buf_err + 1] = data
   end)
 
   return {
     cancel = function()
-      if done then return end
+      if done then
+        return
+      end
       done = true
       safe_close(timer)
-      if handle and not handle:is_closing() then pcall(uv.process_kill, handle, "sigterm") end
-      safe_close(stdout); safe_close(stderr); safe_close(handle)
+      if handle and not handle:is_closing() then
+        pcall(uv.process_kill, handle, "sigterm")
+      end
+      safe_close(stdout)
+      safe_close(stderr)
+      safe_close(handle)
     end,
   }
 end
@@ -83,14 +103,16 @@ local function split_lines(s)
   for line in (s .. "\n"):gmatch("([^\n]*)\n") do
     out[#out + 1] = line:gsub("\r$", "")
   end
-  while #out > 0 and out[#out] == "" do out[#out] = nil end
+  while #out > 0 and out[#out] == "" do
+    out[#out] = nil
+  end
   return out
 end
 
 --- Lookup a definition via sdcv.
 -- @return { cancel = fun() }
 function M.define(_server, _port, database, word, timeout_ms, on_lines)
-  word     = tostring(word or ""):gsub("[\r\n]", "")
+  word = tostring(word or ""):gsub("[\r\n]", "")
   database = tostring(database or ""):gsub("[\r\n]", "")
 
   local argv = { "sdcv", "-n", "-j" }
@@ -103,14 +125,16 @@ function M.define(_server, _port, database, word, timeout_ms, on_lines)
   return run(argv, timeout_ms, function(out_chunks, err_chunks, code)
     -- Treat spawn error / timeout as network-style failure (don't cache).
     if code == nil or code == -1 then
-      on_lines({}, false); return
+      on_lines({}, false)
+      return
     end
 
     local stderr_blob = table.concat(err_chunks)
     -- sdcv prints "Nothing similar to <word>, sorry :(" and returns exit=1
     -- for authoritative no-match. Treat as ok=true, empty result.
     if stderr_blob:find("Nothing similar") then
-      on_lines({}, true); return
+      on_lines({}, true)
+      return
     end
 
     local blob = table.concat(out_chunks)
@@ -121,9 +145,12 @@ function M.define(_server, _port, database, word, timeout_ms, on_lines)
     end
 
     local decoded
-    local ok = pcall(function() decoded = vim.json.decode(blob) end)
+    local ok = pcall(function()
+      decoded = vim.json.decode(blob)
+    end)
     if not ok or type(decoded) ~= "table" then
-      on_lines({}, false); return
+      on_lines({}, false)
+      return
     end
 
     local lines = {}
@@ -145,7 +172,7 @@ end
 --- List candidate matches via sdcv.
 -- @return { cancel = fun() }
 function M.match(_server, _port, database, word, timeout_ms, on_matches)
-  word     = tostring(word or ""):gsub("[\r\n]", "")
+  word = tostring(word or ""):gsub("[\r\n]", "")
   database = tostring(database or ""):gsub("[\r\n]", "")
 
   -- `sdcv -0 <word>` prints matching headwords (one per line) then exits.
@@ -160,20 +187,31 @@ function M.match(_server, _port, database, word, timeout_ms, on_matches)
   table.insert(argv, word)
 
   return run(argv, timeout_ms, function(out_chunks, _, code)
-    if code == nil or code == -1 then on_matches({}, false); return end
+    if code == nil or code == -1 then
+      on_matches({}, false)
+      return
+    end
     local blob = table.concat(out_chunks)
-    if blob == "" then on_matches({}, code == 0); return end
+    if blob == "" then
+      on_matches({}, code == 0)
+      return
+    end
 
     local decoded, ok = nil, false
-    ok = pcall(function() decoded = vim.json.decode(blob) end)
+    ok = pcall(function()
+      decoded = vim.json.decode(blob)
+    end)
     if not ok or type(decoded) ~= "table" then
       -- Fallback: line-per-match text format
-      on_matches(split_lines(blob), true); return
+      on_matches(split_lines(blob), true)
+      return
     end
 
     local words = {}
     for _, entry in ipairs(decoded) do
-      if entry.word then words[#words + 1] = entry.word end
+      if entry.word then
+        words[#words + 1] = entry.word
+      end
     end
     on_matches(words, true)
   end)
@@ -185,13 +223,17 @@ end
 -- @return string[]
 function M.list_dicts()
   local blob = vim.fn.system({ "sdcv", "-l" })
-  if vim.v.shell_error ~= 0 then return {} end
+  if vim.v.shell_error ~= 0 then
+    return {}
+  end
   local out = {}
   for _, line in ipairs(split_lines(blob)) do
     if not line:match("^Dictionary") and line ~= "" then
       -- Strip trailing whitespace + digits (the word-count column).
       local name = line:gsub("%s+%d+%s*$", "")
-      if name ~= "" then out[#out + 1] = name end
+      if name ~= "" then
+        out[#out + 1] = name
+      end
     end
   end
   return out
