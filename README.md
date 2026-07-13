@@ -158,18 +158,38 @@ Two backends are supported via `opts.provider`:
 Running your own `dictd` server locally makes every lookup a loopback call.
 Response time drops from ~1–2s (dict.org round trip) to a few milliseconds.
 
-**Arch Linux**
+The `dict` CLI reads `/etc/dict/dict.conf` (or `~/.dictrc`) and tries each
+server in the listed order, falling back to the next one on connection
+failure. On most distros the default file lists `localhost` first, so once
+`dictd` is running locally, `provider = "cli"` transparently uses it —
+**no plugin config needed**.
 
-```
-sudo pacman -S dictd dict-wn dict-gcide dict-moby-thesaurus dict-foldoc dict-jargon
-sudo systemctl enable --now dictd
-```
-
-**Debian / Ubuntu**
+**Debian / Ubuntu** — the easiest path, databases are packaged:
 
 ```
 sudo apt install dictd dict-wn dict-gcide dict-moby-thesaurus dict-foldoc dict-jargon
-# dictd starts automatically; databases are configured in /etc/dictd/
+# dictd starts automatically; databases live in /usr/share/dictd/
+```
+
+**Arch Linux** — only `dictd` (server + client) is packaged. **There are no
+`dict-*` database packages** in the official repos or AUR. Get databases
+from FreeDict, from Debian `.deb` files, or build your own with `dictfmt`.
+
+```
+sudo pacman -S dictd
+sudo systemctl enable --now dictd
+
+# Option 1 — FreeDict bilingual dictionaries
+# https://freedict.org/downloads/  (grab *-dictd.tar.xz for each pair)
+# Extract .dict.dz + .index into /usr/share/dictd/
+
+# Option 2 — reuse Debian DB packages (no runtime deps)
+mkdir /tmp/dict && cd /tmp/dict
+wget http://ftp.debian.org/debian/pool/main/d/dict-wn/dict-wn_3.0-38_all.deb
+ar x dict-wn_3.0-38_all.deb && tar xf data.tar.xz
+sudo cp usr/share/dictd/*.{index,dict.dz} /usr/share/dictd/
+sudo dictdconfig -w                          # regenerate /etc/dictd/dictd.conf
+sudo systemctl restart dictd
 ```
 
 **Fedora**
@@ -179,33 +199,48 @@ sudo dnf install dictd dictd-server dict-wn dict-gcide
 sudo systemctl enable --now dictd
 ```
 
-**macOS (Homebrew)**
+**macOS (Homebrew)** — `dictd` is packaged, DBs are not; use FreeDict.
 
 ```
 brew install dictd
 brew services start dictd
-# Grab database files: https://download.gnu.org.ua/pub/mirror.gnu.dictorg/
 ```
 
-After the daemon is running, verify:
+**Verify:**
 
 ```
 dict -h localhost -d gcide definition
 ```
 
-If that returns text, point the plugin at your local server:
+**Point the plugin at CLI mode.** No `server` override needed — `dict`
+already knows to try localhost first:
 
 ```lua
 require("lexicon").setup({
-  provider   = "cli",     -- OR keep provider = "dict.org" and set server = "localhost"
-  server     = "localhost",
-  timeout_ms = 1500,      -- local is fast; a short budget is safe
+  provider   = "cli",
+  timeout_ms = 1500,   -- local is single-digit-millisecond
 })
 ```
 
-For extra languages, drop `dict-*.dict.dz` + `.index` files into `/usr/share/dictd/`
-and add lines to `/etc/dict/dictd.conf`. `dictfmt` converts a plain word-list
-into a dictd DB. See `dictd(8)` and `dictfmt(1)`.
+### Building custom DBs from Aspell / Hunspell
+
+Since Arch (and macOS) ship only Aspell / Hunspell dictionaries, you can
+convert them into dictd databases with `dictfmt`:
+
+```
+# Aspell → plain word list → dictd DB
+aspell -d pt dump master | aspell -l pt expand > /tmp/pt.words
+dictfmt --allchars --utf8 --headword-separator ':' \
+  -s "Portuguese Word List" pt-words < /tmp/pt.words
+
+# Now pt-words.dict + pt-words.index exist. Install them:
+sudo mv pt-words.dict pt-words.index /usr/share/dictd/
+sudo dictdconfig -w
+sudo systemctl restart dictd
+```
+
+The resulting DB has words only (no definitions), useful as a spell-check
+source. For real bilingual definitions, FreeDict is the shortest path.
 
 ## Configuration
 
