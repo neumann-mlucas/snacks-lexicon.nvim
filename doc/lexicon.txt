@@ -110,35 +110,11 @@ Provider modes~
                   `dictd` server; automatically falls back to "dict.org" if
                   the `dict` binary is not on $PATH.
 
-Local dictd for near-instant lookups~
-    Install the `dictd` daemon and dictionary DBs, enable the systemd
-    unit, and switch the plugin to `provider = "cli"`. The `dict` client
-    reads /etc/dict/dict.conf which lists `localhost` first on most
-    distros, so it uses your local server transparently with no plugin
-    config beyond `provider`.
->
-        # Debian / Ubuntu — DBs are packaged
-        sudo apt install dictd dict-wn dict-gcide dict-moby-thesaurus
-
-        # Arch — only `dictd` is packaged. Grab DB files from FreeDict
-        # (https://freedict.org/downloads/) or extract them from the
-        # Debian dict-* .deb archives into /usr/share/dictd/. Then edit
-        # /etc/dict/dictd.conf by hand (dictdconfig is Debian-only) to
-        # add a `database <name> { data ...; index ...; }` block per DB.
-        sudo pacman -S dictd
-        sudo systemctl enable --now dictd
-<
-    Then set: >lua
-
-        require("lexicon").setup({
-          provider   = "cli",
-          timeout_ms = 1500,
-        })
-<
-    Custom databases: convert a word list with `dictfmt(1)`, drop the
-    .dict.dz + .index into /usr/share/dictd/, add a `database` block to
-    /etc/dict/dictd.conf (or run `dictdconfig -w` on Debian), restart
-    dictd.
+Local dictd~
+    When `provider = "cli"` and a local dictd server is running, the `dict`
+    client uses it automatically (via /etc/dict/dict.conf). See the README
+    for server install and DB setup instructions — that layer is outside
+    the plugin's scope.
 
 Database name convention~
     dict.org exposes FreeDict pairs as `fd-<src>-<dst>` (e.g. `fd-eng-por`).
