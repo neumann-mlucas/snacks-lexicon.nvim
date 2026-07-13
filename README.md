@@ -111,7 +111,7 @@ Windows users should stay on the default `provider = "dict.org"`.
     provider     = "dict.org",  -- or "cli" (uses the `dict` binary; works offline)
     server       = "dict.org",
     port         = 2628,
-    timeout_ms   = 3000,        -- per-request budget in milliseconds
+    timeout_ms   = 6000,        -- per-request budget in milliseconds
     default_lang = "en",
     parallel     = false,       -- true → preview fetches all sources at once
     suggest      = true,        -- MATCH fallback for empty results
@@ -151,7 +151,61 @@ Source cycle order (English): `wn → moby-thesaurus → gcide → foldoc → ja
 Two backends are supported via `opts.provider`:
 
 - `"dict.org"` (default): native `vim.uv` TCP client to a DICT server. Requires network.
-- `"cli"`: shells out to the `dict` binary (`sudo pacman -S dictd` / `apt install dictd`). Works offline against a local `dictd` server if you have one, or online via `/etc/dict.conf`. Automatically falls back to the network provider if `dict` is not on PATH.
+- `"cli"`: shells out to the `dict` binary. Works offline against a local `dictd` server, or online via `/etc/dict.conf`. Falls back to the network provider if `dict` is not on `PATH`.
+
+### Local dictd — near-instant lookups
+
+Running your own `dictd` server locally makes every lookup a loopback call.
+Response time drops from ~1–2s (dict.org round trip) to a few milliseconds.
+
+**Arch Linux**
+
+```
+sudo pacman -S dictd dict-wn dict-gcide dict-moby-thesaurus dict-foldoc dict-jargon
+sudo systemctl enable --now dictd
+```
+
+**Debian / Ubuntu**
+
+```
+sudo apt install dictd dict-wn dict-gcide dict-moby-thesaurus dict-foldoc dict-jargon
+# dictd starts automatically; databases are configured in /etc/dictd/
+```
+
+**Fedora**
+
+```
+sudo dnf install dictd dictd-server dict-wn dict-gcide
+sudo systemctl enable --now dictd
+```
+
+**macOS (Homebrew)**
+
+```
+brew install dictd
+brew services start dictd
+# Grab database files: https://download.gnu.org.ua/pub/mirror.gnu.dictorg/
+```
+
+After the daemon is running, verify:
+
+```
+dict -h localhost -d gcide definition
+```
+
+If that returns text, point the plugin at your local server:
+
+```lua
+require("lexicon").setup({
+  provider   = "cli",     -- OR keep provider = "dict.org" and set server = "localhost"
+  server     = "localhost",
+  timeout_ms = 1500,      -- local is fast; a short budget is safe
+})
+```
+
+For extra languages, drop `dict-*.dict.dz` + `.index` files into `/usr/share/dictd/`
+and add lines to `/etc/dict/dictd.conf`. `dictfmt` converts a plain word-list
+into a dictd DB. See `dictd(8)` and `dictfmt(1)`.
 
 ## Configuration
 

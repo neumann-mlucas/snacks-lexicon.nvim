@@ -98,7 +98,7 @@ Top-level options passed to |lexicon.setup()|:
     provider       string    "dict.org" | "cli"         (default: "dict.org")
     server         string    DICT server hostname       (default: "dict.org")
     port           number    DICT port                  (default: 2628)
-    timeout_ms     number    request timeout in ms      (default: 3000)
+    timeout_ms     number    request timeout in ms      (default: 6000)
     default_lang   string    initial language key       (default: "en")
     parallel       boolean   fetch all sources at once  (default: false)
     suggest        boolean   MATCH fallback on empty    (default: true)
@@ -109,6 +109,29 @@ Provider modes~
     - "cli":      shells out to `dict(1)`. Works offline against a local
                   `dictd` server; automatically falls back to "dict.org" if
                   the `dict` binary is not on $PATH.
+
+Local dictd for near-instant lookups~
+    Install the `dictd` server plus DB packages, enable the systemd unit,
+    then point the plugin at localhost. Response time drops from seconds
+    to milliseconds. Example:
+>
+        # Arch
+        sudo pacman -S dictd dict-wn dict-gcide dict-moby-thesaurus
+        sudo systemctl enable --now dictd
+
+        # Debian / Ubuntu
+        sudo apt install dictd dict-wn dict-gcide dict-moby-thesaurus
+<
+    Then set: >lua
+
+        require("lexicon").setup({
+          server     = "localhost",
+          timeout_ms = 1500,
+        })
+<
+    Custom databases: convert a word list with `dictfmt(1)`, drop the
+    .dict.dz + .index into /usr/share/dictd/, add an entry in
+    /etc/dict/dictd.conf, restart dictd.
 
 Language profiles~
 
