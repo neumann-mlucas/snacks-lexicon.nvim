@@ -67,8 +67,15 @@ local function parse_matches(raw)
   return out
 end
 
+-- Response is considered "successful" once we've seen any 2xx or 5xx status
+-- code from the server. That distinguishes a genuine no-match reply from a
+-- network/timeout error so callers can decide whether to cache the result.
+local function saw_valid_reply(raw)
+  return raw:find("^%d%d%d[ \r]") ~= nil or raw:find("\n%d%d%d[ \r]") ~= nil
+end
+
 -- Generic request runner: build a command from `builder(db, word)` and parse
--- the accumulated response with `parser`. Both are provided by the caller.
+-- the accumulated response with `parser`. Callback receives (result, ok).
 local function run_request(server, port, database, word, timeout_ms, on_result, builder, parser)
   word     = tostring(word or ""):gsub("[\r\n]", "")
   database = tostring(database or ""):gsub("[\r\n]", "")
@@ -87,11 +94,13 @@ local function run_request(server, port, database, word, timeout_ms, on_result, 
       client = nil
     end
   end
-  local function finish(result)
+  local function finish(explicit_ok)
     if done then return end
     done = true
     cleanup()
-    vim.schedule(function() on_result(result or parser(buf)) end)
+    local ok = explicit_ok
+    if ok == nil then ok = saw_valid_reply(buf) end
+    vim.schedule(function() on_result(parser(buf), ok) end)
   end
   local function cancel()
     if done then return end
@@ -100,13 +109,13 @@ local function run_request(server, port, database, word, timeout_ms, on_result, 
   end
 
   timer = uv.new_timer()
-  timer:start(timeout_ms, 0, function() finish({}) end)
+  timer:start(timeout_ms, 0, function() finish(false) end)  -- timeout → not ok
 
   uv.getaddrinfo(server, tostring(port), { socktype = "stream" }, function(err, res)
-    if err or not res or not res[1] then finish({}) return end
+    if err or not res or not res[1] then finish(false) return end
 
     local function try(i)
-      if done or i > #res then finish({}) return end
+      if done or i > #res then finish(false) return end
       local addr = res[i]
       client = uv.new_tcp(addr.family == "inet6" and "inet6" or "inet")
       client:connect(addr.addr, port, function(cerr)
@@ -116,7 +125,7 @@ local function run_request(server, port, database, word, timeout_ms, on_result, 
           return
         end
         client:write(builder(dict_quote(database), dict_quote(word)), function(werr)
-          if werr then finish({}) end
+          if werr then finish(false) end
         end)
         client:read_start(function(rerr, data)
           if rerr or not data then finish() return end

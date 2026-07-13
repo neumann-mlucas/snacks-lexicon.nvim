@@ -38,11 +38,12 @@ local LANG_DEFAULTS = {
 M.config = {
   server       = "dict.org",
   port         = 2628,
-  timeout_ms   = 3000,
+  timeout_ms   = 3000,       -- per-request budget (define/match/all)
   default_lang = "en",
   languages    = LANG_DEFAULTS,
-  parallel     = false,   -- true → preview fetches all sources at once
-  suggest      = true,    -- true → MATCH ... on empty define result
+  parallel     = false,      -- true → preview fetches all sources at once
+  suggest      = true,       -- true → MATCH ... on empty define result
+  provider     = "dict.org", -- "dict.org" (TCP) | "cli" (dict binary, works offline)
 }
 
 -- Per-language cursor into cfg.sources so switching languages does not
@@ -79,6 +80,11 @@ function M.setup(opts)
   end
 
   M._state.source_idx_by_lang = {}
+
+  -- Any old cached results were built with previous settings (provider,
+  -- server). Wipe so setup() reliably applies.
+  local ok, cache = pcall(require, "lexicon.cache")
+  if ok then cache.clear() end
 end
 
 --- Return language config table for lang_key (falls back to default_lang).
@@ -129,31 +135,38 @@ function M.words_file(lang_key)
   end
 end
 
+-- Pick the transport implementation based on `config.provider`.
+-- Falls back to network if CLI selected but `dict` is not on PATH.
+local function provider()
+  if M.config.provider == "cli" then
+    local cli = require("lexicon.cli")
+    if cli.available() then return cli end
+    vim.notify("lexicon: config.provider='cli' but `dict` not found; falling back to network",
+      vim.log.levels.WARN)
+  end
+  return require("lexicon.protocol")
+end
+
 --- Async definition fetch; on_lines called on vim main thread.
--- @return { cancel = fun() }  cancels the in-flight request
+-- Callback signature: on_lines(lines: string[], ok: boolean).
+-- `ok=true` means we got a valid reply (may be empty). `ok=false` means the
+-- request failed (timeout / network / spawn error) and callers should not
+-- cache the result.
+-- @return { cancel = fun() }
 function M.fetch(word, database, on_lines)
-  local proto = require("lexicon.protocol")
-  return proto.define(
-    M.config.server,
-    M.config.port,
-    database,
-    word,
-    M.config.timeout_ms,
-    on_lines
+  return provider().define(
+    M.config.server, M.config.port,
+    database, word, M.config.timeout_ms, on_lines
   )
 end
 
 --- Async MATCH — fuzzy-list candidate words in a database.
+-- Callback: on_matches(words: string[], ok: boolean).
 -- @return { cancel = fun() }
 function M.match(word, database, on_matches)
-  local proto = require("lexicon.protocol")
-  return proto.match(
-    M.config.server,
-    M.config.port,
-    database,
-    word,
-    M.config.timeout_ms,
-    on_matches
+  return provider().match(
+    M.config.server, M.config.port,
+    database, word, M.config.timeout_ms, on_matches
   )
 end
 
@@ -169,13 +182,15 @@ function M.fetch_all(word, lang_key, on_result)
   local pending  = #sources
   local handles  = {}
   local canceled = false
+  local all_ok   = true
 
   for i, src in ipairs(sources) do
-    handles[i] = M.fetch(word, src, function(lines)
+    handles[i] = M.fetch(word, src, function(lines, ok)
       if canceled then return end
-      results[i] = { src = src, lines = lines }
+      results[i] = { src = src, lines = lines, ok = ok }
+      if not ok then all_ok = false end
       pending = pending - 1
-      if pending == 0 then on_result(results) end
+      if pending == 0 then on_result(results, all_ok) end
     end)
   end
 

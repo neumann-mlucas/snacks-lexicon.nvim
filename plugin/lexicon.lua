@@ -35,3 +35,8 @@ end, {
   nargs = "*",
   desc = "Show a definition in a floating window",
 })
+
+vim.api.nvim_create_user_command("LexiconCacheClear", function()
+  require("lexicon.cache").clear()
+  vim.notify("lexicon: definition cache cleared", vim.log.levels.INFO)
+end, { desc = "Wipe the in-memory definition cache" })

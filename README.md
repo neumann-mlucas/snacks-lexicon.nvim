@@ -41,10 +41,13 @@ opts = {
     { "<leader>wd", function() require("lexicon.picker").de() end,                                      desc = "Dict: Deutsch" },
   },
   opts = {
+    provider     = "dict.org",  -- or "cli" (uses the `dict` binary; works offline)
     server       = "dict.org",
     port         = 2628,
-    timeout_ms   = 3000,
+    timeout_ms   = 3000,        -- per-request budget in milliseconds
     default_lang = "en",
+    parallel     = false,       -- true → preview fetches all sources at once
+    suggest      = true,        -- MATCH fallback for empty results
   },
   config = function(_, opts)
     require("lexicon").setup(opts)
@@ -66,14 +69,22 @@ Source cycle order (English): `wn → moby-thesaurus → gcide → foldoc → ja
 
 ## Commands
 
-| Command                    | Action                                          |
-| -------------------------- | ----------------------------------------------- |
-| `:Lexicon`                 | Open picker for the configured default language |
-| `:Lexicon <lang>`          | Open picker for `<lang>` (tab-completed)        |
-| `:LexiconDefine <word>`    | Floating popup with the definition (no picker)  |
-| `:LexiconDefine <word> <lang>` | Same, in a specific language                |
-| `:checkhealth lexicon`     | Verify snacks, word files, DNS                  |
-| `:help lexicon`            | Full documentation                              |
+| Command                        | Action                                          |
+| ------------------------------ | ----------------------------------------------- |
+| `:Lexicon`                     | Open picker for the configured default language |
+| `:Lexicon <lang>`              | Open picker for `<lang>` (tab-completed)        |
+| `:LexiconDefine <word>`        | Floating popup with the definition (no picker)  |
+| `:LexiconDefine <word> <lang>` | Same, in a specific language                    |
+| `:LexiconCacheClear`           | Wipe the in-memory definition cache             |
+| `:checkhealth lexicon`         | Verify deps, provider, word files, DNS          |
+| `:help lexicon`                | Full documentation                              |
+
+## Provider
+
+Two backends are supported via `opts.provider`:
+
+- `"dict.org"` (default): native `vim.uv` TCP client to a DICT server. Requires network.
+- `"cli"`: shells out to the `dict` binary (`sudo pacman -S dictd` / `apt install dictd`). Works offline against a local `dictd` server if you have one, or online via `/etc/dict.conf`. Automatically falls back to the network provider if `dict` is not on PATH.
 
 ## Configuration
 

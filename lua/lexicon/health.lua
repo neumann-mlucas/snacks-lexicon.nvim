@@ -49,6 +49,19 @@ function M.check()
     end
   end
 
+  vim.health.start("snacks-lexicon: provider")
+  vim.health.info(("provider: %s"):format(lex.config.provider))
+  vim.health.info(("timeout_ms: %d"):format(lex.config.timeout_ms))
+  if lex.config.provider == "cli" then
+    if require("lexicon.cli").available() then
+      vim.health.ok("`dict` binary found on PATH")
+    else
+      vim.health.error(
+        "config.provider='cli' but `dict` not installed",
+        { "Install `dictd`/`dict` (Debian/Ubuntu) or `dict-client` (Arch)" })
+    end
+  end
+
   vim.health.start("snacks-lexicon: server")
   local host = lex.config.server
   local ok, err = dns_ok(host, 2000)

@@ -65,9 +65,13 @@ function M.show(word, lang_key, source)
   local hit = cache.get(word, source)
   if hit then render(hit) return end
 
-  lex.fetch(word, source, function(lines)
-    cache.set(word, source, lines)
-    render(lines)
+  lex.fetch(word, source, function(lines, ok)
+    if ok then cache.set(word, source, lines) end
+    if ok then
+      render(lines)
+    else
+      write(buf, { "  fetch failed (timeout or network error). Try again or raise timeout_ms." })
+    end
   end)
 end
 

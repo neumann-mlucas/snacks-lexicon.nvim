@@ -73,7 +73,10 @@ With |lazy.nvim|: >lua
                         using the current source for `{lang}`. Press `q` or
                         `<Esc>` to close. Cached results render instantly.
 
-:checkhealth lexicon    Verify dependencies, word file availability, DNS.
+                                                          *:LexiconCacheClear*
+:LexiconCacheClear      Wipe the in-memory definition cache.
+
+:checkhealth lexicon    Verify dependencies, provider, word files, DNS.
 
 ==============================================================================
 5. KEYBINDINGS INSIDE THE PICKER                          *lexicon-picker-keys*
@@ -92,6 +95,7 @@ The picker's title bar shows the active language and source:
 
 Top-level options passed to |lexicon.setup()|:
 
+    provider       string    "dict.org" | "cli"         (default: "dict.org")
     server         string    DICT server hostname       (default: "dict.org")
     port           number    DICT port                  (default: 2628)
     timeout_ms     number    request timeout in ms      (default: 3000)
@@ -99,6 +103,12 @@ Top-level options passed to |lexicon.setup()|:
     parallel       boolean   fetch all sources at once  (default: false)
     suggest        boolean   MATCH fallback on empty    (default: true)
     languages      table     language profiles          (see below)
+
+Provider modes~
+    - "dict.org": native vim.uv TCP client — no dependencies, needs network.
+    - "cli":      shells out to `dict(1)`. Works offline against a local
+                  `dictd` server; automatically falls back to "dict.org" if
+                  the `dict` binary is not on $PATH.
 
 Language profiles~
 

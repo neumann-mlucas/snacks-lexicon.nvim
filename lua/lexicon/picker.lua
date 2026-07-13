@@ -229,9 +229,17 @@ function M.open(lang_key, opts)
     pcall(function() picker:update_titles() end)
   end
 
-  -- Render either the definition or a "no definition" placeholder + suggestions.
-  local function render_one(preview, word, src, lines, suggestions)
-    if #lines == 0 then
+  -- Render either the definition, a "no definition" placeholder, or an
+  -- explicit fetch-failure message. Suggestions are appended for empty results.
+  local function render_one(preview, word, src, lines, ok, suggestions)
+    if not ok then
+      write_lines(preview, {
+        "",
+        "  fetch failed (timeout, network, or dict server unreachable)",
+        "",
+        "  Try again, raise timeout_ms in config, or switch provider.",
+      })
+    elseif #lines == 0 then
       local buf = { "", "  no definition found: " .. word }
       if suggestions and #suggestions > 0 then
         buf[#buf + 1] = ""
@@ -289,10 +297,12 @@ function M.open(lang_key, opts)
       state.timer:start(DEBOUNCE_MS, 0, vim.schedule_wrap(function()
         cancel_timer()
         if state.gen ~= my_gen then return end
-        state.fetch = lex.fetch_all(word, lang_key, function(results)
+        state.fetch = lex.fetch_all(word, lang_key, function(results, _all_ok)
           state.fetch = nil
           if state.gen ~= my_gen then return end
-          for _, r in ipairs(results) do cache.set(word, r.src, r.lines) end
+          for _, r in ipairs(results) do
+            if r.ok then cache.set(word, r.src, r.lines) end
+          end
           render_all(preview, word, results)
         end)
       end))
@@ -302,7 +312,7 @@ function M.open(lang_key, opts)
     -- Single-source: cache hit renders immediately.
     local hit = cache.get(word, src)
     if hit then
-      render_one(preview, word, src, hit, nil)
+      render_one(preview, word, src, hit, true, nil)
       return
     end
 
@@ -312,20 +322,20 @@ function M.open(lang_key, opts)
       cancel_timer()
       if state.gen ~= my_gen then return end
 
-      state.fetch = lex.fetch(word, src, function(lines)
+      state.fetch = lex.fetch(word, src, function(lines, ok)
         state.fetch = nil
         if state.gen ~= my_gen then return end
-        cache.set(word, src, lines)
+        if ok then cache.set(word, src, lines) end  -- never cache errors
 
-        -- No result and suggestions enabled → fire a MATCH request.
-        if #lines == 0 and lex.config.suggest then
-          state.fetch = lex.match(word, src, function(matches)
+        -- No result AND ok AND suggestions enabled → fire a MATCH request.
+        if ok and #lines == 0 and lex.config.suggest then
+          state.fetch = lex.match(word, src, function(matches, _mok)
             state.fetch = nil
             if state.gen ~= my_gen then return end
-            render_one(preview, word, src, lines, matches)
+            render_one(preview, word, src, lines, ok, matches)
           end)
         else
-          render_one(preview, word, src, lines, nil)
+          render_one(preview, word, src, lines, ok, nil)
         end
       end)
     end))
