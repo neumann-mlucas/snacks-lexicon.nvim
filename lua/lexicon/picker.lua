@@ -1,7 +1,7 @@
-local lex   = require("lexicon")
+local lex = require("lexicon")
 local cache = require("lexicon.cache")
-local uv    = vim.uv or vim.loop
-local M     = {}
+local uv = vim.uv or vim.loop
+local M = {}
 
 -- Module-level cache of word lists keyed by absolute file path.
 -- Avoids re-reading /usr/share/dict/words (~200k lines, ~100ms) on every open.
@@ -61,7 +61,9 @@ end
 -- written. Cheap linear scan; buffers are small (a few hundred lines).
 local function apply_highlights(preview)
   local buf = preview and preview.win and preview.win.buf
-  if not buf or not vim.api.nvim_buf_is_valid(buf) then return end
+  if not buf or not vim.api.nvim_buf_is_valid(buf) then
+    return
+  end
   vim.api.nvim_buf_clear_namespace(buf, NS, 0, -1)
 
   local n = vim.api.nvim_buf_line_count(buf)
@@ -84,14 +86,18 @@ local function apply_highlights(preview)
     local s, e = 0, 0
     while true do
       s, e = line:find("{[^}]+}", e + 1)
-      if not s then break end
+      if not s then
+        break
+      end
       vim.api.nvim_buf_add_highlight(buf, NS, "Underlined", i, s - 1, e)
     end
     -- Part-of-speech tags: [n], [v], [adj]
     s, e = 0, 0
     while true do
       s, e = line:find("%[%a+%]", e + 1)
-      if not s then break end
+      if not s then
+        break
+      end
       vim.api.nvim_buf_add_highlight(buf, NS, "Type", i, s - 1, e)
     end
   end
@@ -101,9 +107,15 @@ end
 -- Preview manages its own buffer swaps; using preview:set_lines() ensures
 -- we always target the buffer that is currently visible in the window.
 local function write_lines(preview, lines)
-  if not preview then return end
-  local ok = pcall(function() preview:set_lines(lines) end)
-  if ok then return end
+  if not preview then
+    return
+  end
+  local ok = pcall(function()
+    preview:set_lines(lines)
+  end)
+  if ok then
+    return
+  end
   -- Fallback: direct buffer write (in case preview API is unavailable)
   local buf = preview.win and preview.win.buf
   if buf and vim.api.nvim_buf_is_valid(buf) then
@@ -115,7 +127,9 @@ end
 
 -- Safely update window title (no-op if window is gone).
 local function set_title(win, title)
-  pcall(function() win:set_title(title) end)
+  pcall(function()
+    win:set_title(title)
+  end)
 end
 
 -- Return a lowercased seed from <cword> if it looks like a real word.
@@ -131,14 +145,16 @@ end
 -- Load a word file into snacks picker item format, with case-insensitive
 -- ordinal for search matching. Cached per path.
 local function load_words(path)
-  if WORD_CACHE[path] then return WORD_CACHE[path] end
+  if WORD_CACHE[path] then
+    return WORD_CACHE[path]
+  end
   local items = {}
   for line in io.lines(path) do
     if line ~= "" then
       items[#items + 1] = {
-        text    = line,        -- shown in the list
-        word    = line,        -- inserted on <CR>
-        ordinal = line:lower(),-- used by matcher for fuzzy filtering
+        text = line, -- shown in the list
+        word = line, -- inserted on <CR>
+        ordinal = line:lower(), -- used by matcher for fuzzy filtering
       }
     end
   end
@@ -149,24 +165,30 @@ end
 -- Resolve the snacks.picker.pick function. Handles the case where snacks
 -- is loaded but the global is not exposed yet.
 local function get_pick()
-  if _G.Snacks and _G.Snacks.picker then return _G.Snacks.picker.pick end
+  if _G.Snacks and _G.Snacks.picker then
+    return _G.Snacks.picker.pick
+  end
   local ok, snacks = pcall(require, "snacks")
-  if ok and snacks and snacks.picker then return snacks.picker.pick end
+  if ok and snacks and snacks.picker then
+    return snacks.picker.pick
+  end
 end
 
 --- Open a lexicon picker for lang_key.
 -- @param lang_key string|nil  e.g. "en", "pt", "de". Defaults to config.default_lang.
 -- @param opts     table|nil   Merged into Snacks.picker opts.
 function M.open(lang_key, opts)
-  opts     = opts or {}
+  opts = opts or {}
   lang_key = lang_key or lex.config.default_lang
 
   local cfg = lex.lang_cfg(lang_key)
-  local wf  = lex.words_file(lang_key)
+  local wf = lex.words_file(lang_key)
   if not wf then
     vim.notify(
-      ("snacks-lexicon [%s]: no word file found.\n"
-        .. "Set languages.%s.word_files in require('lexicon').setup()."):format(lang_key, lang_key),
+      ("snacks-lexicon [%s]: no word file found.\n" .. "Set languages.%s.word_files in require('lexicon').setup()."):format(
+        lang_key,
+        lang_key
+      ),
       vim.log.levels.WARN
     )
     return
@@ -192,10 +214,7 @@ function M.open(lang_key, opts)
 
   local items = load_words(wf)
   if #items == 0 then
-    vim.notify(
-      ("snacks-lexicon: word file is empty: %s"):format(wf),
-      vim.log.levels.WARN
-    )
+    vim.notify(("snacks-lexicon: word file is empty: %s"):format(wf), vim.log.levels.WARN)
     return
   end
 
@@ -224,9 +243,15 @@ function M.open(lang_key, opts)
   -- Update the preview window title (the source name) via the snacks title
   -- template system so the change survives layout refreshes.
   local function refresh_titles(picker, src)
-    if not picker then return end
-    if src and picker.preview then picker.preview.title = src end
-    pcall(function() picker:update_titles() end)
+    if not picker then
+      return
+    end
+    if src and picker.preview then
+      picker.preview.title = src
+    end
+    pcall(function()
+      picker:update_titles()
+    end)
   end
 
   -- Render either the definition, a "no definition" placeholder, or an
@@ -245,7 +270,9 @@ function M.open(lang_key, opts)
         buf[#buf + 1] = ""
         buf[#buf + 1] = "  did you mean:"
         for _, s in ipairs(suggestions) do
-          if #buf < 30 then buf[#buf + 1] = "    - " .. s end
+          if #buf < 30 then
+            buf[#buf + 1] = "    - " .. s
+          end
         end
       end
       write_lines(preview, buf)
@@ -293,18 +320,28 @@ function M.open(lang_key, opts)
 
       write_lines(preview, { "", "  fetching all sources…" })
       state.timer = uv.new_timer()
-      state.timer:start(DEBOUNCE_MS, 0, vim.schedule_wrap(function()
-        cancel_timer()
-        if state.gen ~= my_gen then return end
-        state.fetch = lex.fetch_all(word, lang_key, function(results, _all_ok)
-          state.fetch = nil
-          if state.gen ~= my_gen then return end
-          for _, r in ipairs(results) do
-            if r.ok then cache.set(word, r.src, r.lines) end
+      state.timer:start(
+        DEBOUNCE_MS,
+        0,
+        vim.schedule_wrap(function()
+          cancel_timer()
+          if state.gen ~= my_gen then
+            return
           end
-          render_all(preview, picker, word, results)
+          state.fetch = lex.fetch_all(word, lang_key, function(results, _all_ok)
+            state.fetch = nil
+            if state.gen ~= my_gen then
+              return
+            end
+            for _, r in ipairs(results) do
+              if r.ok then
+                cache.set(word, r.src, r.lines)
+              end
+            end
+            render_all(preview, picker, word, results)
+          end)
         end)
-      end))
+      )
       return
     end
 
@@ -317,27 +354,39 @@ function M.open(lang_key, opts)
 
     write_lines(preview, { "", "  fetching…" })
     state.timer = uv.new_timer()
-    state.timer:start(DEBOUNCE_MS, 0, vim.schedule_wrap(function()
-      cancel_timer()
-      if state.gen ~= my_gen then return end
-
-      state.fetch = lex.fetch(word, src, function(lines, ok)
-        state.fetch = nil
-        if state.gen ~= my_gen then return end
-        if ok then cache.set(word, src, lines) end  -- never cache errors
-
-        -- No result AND ok AND suggestions enabled → fire a MATCH request.
-        if ok and #lines == 0 and lex.config.suggest then
-          state.fetch = lex.match(word, src, function(matches, _mok)
-            state.fetch = nil
-            if state.gen ~= my_gen then return end
-            render_one(preview, picker, word, src, lines, ok, matches)
-          end)
-        else
-          render_one(preview, picker, word, src, lines, ok, nil)
+    state.timer:start(
+      DEBOUNCE_MS,
+      0,
+      vim.schedule_wrap(function()
+        cancel_timer()
+        if state.gen ~= my_gen then
+          return
         end
+
+        state.fetch = lex.fetch(word, src, function(lines, ok)
+          state.fetch = nil
+          if state.gen ~= my_gen then
+            return
+          end
+          if ok then
+            cache.set(word, src, lines)
+          end -- never cache errors
+
+          -- No result AND ok AND suggestions enabled → fire a MATCH request.
+          if ok and #lines == 0 and lex.config.suggest then
+            state.fetch = lex.match(word, src, function(matches, _mok)
+              state.fetch = nil
+              if state.gen ~= my_gen then
+                return
+              end
+              render_one(preview, picker, word, src, lines, ok, matches)
+            end)
+          else
+            render_one(preview, picker, word, src, lines, ok, nil)
+          end
+        end)
       end)
-    end))
+    )
   end
 
   -- Only these opts may be overridden by callers. Prevents accidents like
@@ -345,18 +394,20 @@ function M.open(lang_key, opts)
   local ALLOWED = { pattern = true, title = true, layout = true, on_close = true }
   local user = {}
   for k, v in pairs(opts) do
-    if ALLOWED[k] then user[k] = v end
+    if ALLOWED[k] then
+      user[k] = v
+    end
   end
 
   pick(vim.tbl_extend("force", {
-    source  = "lexicon_" .. lang_key,
+    source = "lexicon_" .. lang_key,
     -- `title` is snacks' picker.title, which we don't render anywhere
     -- (each box has its own explicit title below) but keep sensible for
     -- users inspecting `Snacks.picker.get()`.
-    title   = "Lexicon",
+    title = "Lexicon",
     pattern = seed_pattern(),
-    format  = "text",
-    items   = items,
+    format = "text",
+    items = items,
 
     -- Three-title layout:
     --   • Outer horizontal box   → "Lexicon" (static, plugin identity)
@@ -364,26 +415,26 @@ function M.open(lang_key, opts)
     --   • Preview window          → dict source, e.g. " gcide " (updated on cycle)
     layout = {
       layout = {
-        box       = "horizontal",
-        width     = 0.92,
-        height    = 0.88,
-        border    = "rounded",
-        title     = " Lexicon ",
+        box = "horizontal",
+        width = 0.92,
+        height = 0.88,
+        border = "rounded",
+        title = " Lexicon ",
         title_pos = "center",
         {
-          box       = "vertical",
-          border    = true,
-          title     = (" %s "):format(cfg.label),
+          box = "vertical",
+          border = true,
+          title = (" %s "):format(cfg.label),
           title_pos = "center",
           { win = "input", height = 1, border = "bottom" },
-          { win = "list",  border = "none" },
+          { win = "list", border = "none" },
         },
         {
-          win       = "preview",
-          border    = true,
-          title     = "{preview}",
+          win = "preview",
+          border = true,
+          title = "{preview}",
           title_pos = "center",
-          width     = 0.72,
+          width = 0.72,
         },
       },
     },
@@ -404,41 +455,47 @@ function M.open(lang_key, opts)
     actions = {
       lexicon_cycle_source = function(picker)
         local item = picker.list:current()
-        if not item then return end
+        if not item then
+          return
+        end
         lex.cycle_source(lang_key)
         schedule_fetch(picker.preview, picker, item.word)
       end,
       lexicon_prev_source = function(picker)
         local item = picker.list:current()
-        if not item then return end
+        if not item then
+          return
+        end
         lex.cycle_source_prev(lang_key)
         schedule_fetch(picker.preview, picker, item.word)
       end,
       lexicon_toggle_parallel = function(picker)
         lex.config.parallel = not lex.config.parallel
         local item = picker.list:current()
-        if item then schedule_fetch(picker.preview, picker, item.word) end
+        if item then
+          schedule_fetch(picker.preview, picker, item.word)
+        end
       end,
     },
 
     win = {
       input = {
         keys = {
-          ["<C-n>"] = { "lexicon_cycle_source",   mode = { "i", "n" } },
-          ["<C-p>"] = { "lexicon_prev_source",    mode = { "i", "n" } },
+          ["<C-n>"] = { "lexicon_cycle_source", mode = { "i", "n" } },
+          ["<C-p>"] = { "lexicon_prev_source", mode = { "i", "n" } },
           ["<C-a>"] = { "lexicon_toggle_parallel", mode = { "i", "n" } },
         },
       },
       preview = {
         wo = {
-          number         = false,
+          number = false,
           relativenumber = false,
-          signcolumn     = "no",
-          wrap           = true,
-          linebreak      = true,
-          breakindent    = true,
-          list           = false,
-          cursorline     = false,
+          signcolumn = "no",
+          wrap = true,
+          linebreak = true,
+          breakindent = true,
+          list = false,
+          cursorline = false,
         },
       },
     },
@@ -455,7 +512,9 @@ end
 return setmetatable(M, {
   __index = function(_, k)
     if type(k) == "string" and lex.config.languages[k] then
-      return function(o) M.open(k, o) end
+      return function(o)
+        M.open(k, o)
+      end
     end
   end,
 })

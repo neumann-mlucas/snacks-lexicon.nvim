@@ -1,7 +1,7 @@
 -- DICT protocol client (RFC 2229) over raw TCP via vim.uv
 -- No external dependencies (curl, sed, tr, etc.)
 local uv = vim.uv or vim.loop
-local M  = {}
+local M = {}
 
 -- Parse RFC 2229 response. Each definition arrives between:
 --   151 <word> <db> "<name>"     ← definition start
@@ -20,7 +20,9 @@ local function parse(raw)
       if code == "151" then
         in_def = true
       elseif code == "250" then
-        if #out > 0 and out[#out] ~= "" then out[#out + 1] = "" end
+        if #out > 0 and out[#out] ~= "" then
+          out[#out + 1] = ""
+        end
         in_def = false
       end
     elseif line == "." then
@@ -30,7 +32,9 @@ local function parse(raw)
     end
   end
 
-  while #out > 0 and out[#out] == "" do out[#out] = nil end
+  while #out > 0 and out[#out] == "" do
+    out[#out] = nil
+  end
   return out
 end
 
@@ -54,14 +58,18 @@ local function parse_matches(raw)
     line = line:gsub("\r$", "")
     local code = line:match("^(%d%d%d)[ \r]") or line:match("^(%d%d%d)$")
     if code then
-      if code == "152" then in_matches = true
-      elseif code == "250" or code == "550" or code == "552" then in_matches = false
+      if code == "152" then
+        in_matches = true
+      elseif code == "250" or code == "550" or code == "552" then
+        in_matches = false
       end
     elseif line == "." then
       in_matches = false
     elseif in_matches then
       local w = line:match('%s*%S+%s+"(.-)"') or line:match("%s*%S+%s+(%S+)")
-      if w then out[#out + 1] = w end
+      if w then
+        out[#out + 1] = w
+      end
     end
   end
   return out
@@ -77,14 +85,16 @@ end
 -- Generic request runner: build a command from `builder(db, word)` and parse
 -- the accumulated response with `parser`. Callback receives (result, ok).
 local function run_request(server, port, database, word, timeout_ms, on_result, builder, parser)
-  word     = tostring(word or ""):gsub("[\r\n]", "")
+  word = tostring(word or ""):gsub("[\r\n]", "")
   database = tostring(database or ""):gsub("[\r\n]", "")
 
   local buf, done = "", false
   local client, timer
 
   local function safe_close(handle)
-    if handle and not handle:is_closing() then pcall(handle.close, handle) end
+    if handle and not handle:is_closing() then
+      pcall(handle.close, handle)
+    end
   end
   local function cleanup()
     safe_close(timer)
@@ -95,15 +105,23 @@ local function run_request(server, port, database, word, timeout_ms, on_result, 
     end
   end
   local function finish(explicit_ok)
-    if done then return end
+    if done then
+      return
+    end
     done = true
     cleanup()
     local ok = explicit_ok
-    if ok == nil then ok = saw_valid_reply(buf) end
-    vim.schedule(function() on_result(parser(buf), ok) end)
+    if ok == nil then
+      ok = saw_valid_reply(buf)
+    end
+    vim.schedule(function()
+      on_result(parser(buf), ok)
+    end)
   end
   local function cancel()
-    if done then return end
+    if done then
+      return
+    end
     done = true
     cleanup()
   end
@@ -112,31 +130,46 @@ local function run_request(server, port, database, word, timeout_ms, on_result, 
   -- from the server, ok=true and we surface partial results; if buf is
   -- empty, saw_valid_reply → false, so callers treat it as a network error.
   timer = uv.new_timer()
-  timer:start(timeout_ms, 0, function() finish() end)
+  timer:start(timeout_ms, 0, function()
+    finish()
+  end)
 
   uv.getaddrinfo(server, tostring(port), { socktype = "stream" }, function(err, res)
-    if err or not res or not res[1] then finish(false) return end
+    if err or not res or not res[1] then
+      finish(false)
+      return
+    end
 
     local function try(i)
-      if done or i > #res then finish(false) return end
+      if done or i > #res then
+        finish(false)
+        return
+      end
       local addr = res[i]
       client = uv.new_tcp(addr.family == "inet6" and "inet6" or "inet")
       client:connect(addr.addr, port, function(cerr)
         if cerr then
-          if client then safe_close(client); client = nil end
+          if client then
+            safe_close(client)
+            client = nil
+          end
           try(i + 1)
           return
         end
         client:write(builder(dict_quote(database), dict_quote(word)), function(werr)
-          if werr then finish(false) end
+          if werr then
+            finish(false)
+          end
         end)
         client:read_start(function(rerr, data)
-          if rerr or not data then finish() return end
+          if rerr or not data then
+            finish()
+            return
+          end
           buf = buf .. data
           -- 221 = server bye (after QUIT); 250 = transaction complete for
           -- DEFINE/MATCH. Whichever we see first is a valid stopping point.
-          if buf:find("\n221[ \r]") or buf:find("^221[ \r]")
-              or buf:find("\n250[ \r]") or buf:find("^250[ \r]") then
+          if buf:find("\n221[ \r]") or buf:find("^221[ \r]") or buf:find("\n250[ \r]") or buf:find("^250[ \r]") then
             finish()
           end
         end)
@@ -156,22 +189,18 @@ end
 --- Fetch a definition via the DICT protocol.
 -- @return { cancel = fun() }
 function M.define(server, port, database, word, timeout_ms, on_lines)
-  return run_request(server, port, database, word, timeout_ms, on_lines,
-    function(db, w)
-      return ("DEFINE %s %s\r\nQUIT\r\n"):format(db, w)
-    end,
-    parse)
+  return run_request(server, port, database, word, timeout_ms, on_lines, function(db, w)
+    return ("DEFINE %s %s\r\nQUIT\r\n"):format(db, w)
+  end, parse)
 end
 
 --- Fuzzy match a word against a database. Uses the "." strategy which lets
 --- the server pick a reasonable default (lev/soundex depending on the db).
 --- @return { cancel = fun() }
 function M.match(server, port, database, word, timeout_ms, on_matches)
-  return run_request(server, port, database, word, timeout_ms, on_matches,
-    function(db, w)
-      return ("MATCH %s . %s\r\nQUIT\r\n"):format(db, w)
-    end,
-    parse_matches)
+  return run_request(server, port, database, word, timeout_ms, on_matches, function(db, w)
+    return ("MATCH %s . %s\r\nQUIT\r\n"):format(db, w)
+  end, parse_matches)
 end
 
 return M

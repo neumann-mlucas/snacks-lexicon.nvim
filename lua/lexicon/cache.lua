@@ -4,9 +4,9 @@
 -- Not global — one instance per user through the module singleton pattern.
 local M = {}
 
-local MAX  = 100
-local data = {}      -- key -> lines
-local order = {}     -- array of keys, oldest first
+local MAX = 100
+local data = {} -- key -> lines
+local order = {} -- array of keys, oldest first
 local count = 0
 
 local function bump(key)
@@ -22,7 +22,9 @@ end
 function M.get(word, src)
   local key = word .. "\0" .. src
   local v = data[key]
-  if v then bump(key) end
+  if v then
+    bump(key)
+  end
   return v
 end
 

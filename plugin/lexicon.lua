@@ -1,4 +1,6 @@
-if vim.g.loaded_lexicon then return end
+if vim.g.loaded_lexicon then
+  return
+end
 vim.g.loaded_lexicon = true
 
 -- :Lexicon           → open picker for the default language
@@ -6,10 +8,14 @@ vim.g.loaded_lexicon = true
 -- :Lexicon pt / de   → other configured language
 local function complete_langs(prefix)
   local ok, lex = pcall(require, "lexicon")
-  if not ok then return {} end
+  if not ok then
+    return {}
+  end
   local out = {}
   for key in pairs(lex.config.languages) do
-    if key:find("^" .. vim.pesc(prefix)) then out[#out + 1] = key end
+    if key:find("^" .. vim.pesc(prefix)) then
+      out[#out + 1] = key
+    end
   end
   table.sort(out)
   return out
@@ -29,7 +35,9 @@ end, {
 vim.api.nvim_create_user_command("LexiconDefine", function(args)
   local parts = vim.split(args.args, "%s+", { trimempty = true })
   local word = parts[1]
-  if not word or word == "" then word = vim.fn.expand("<cword>") end
+  if not word or word == "" then
+    word = vim.fn.expand("<cword>")
+  end
   require("lexicon.define").show(word, parts[2])
 end, {
   nargs = "*",

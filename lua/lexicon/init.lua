@@ -2,16 +2,16 @@ local M = {}
 
 local LANG_DEFAULTS = {
   en = {
-    label      = "English",
-    sources    = { "wn", "moby-thesaurus", "gcide", "foldoc", "jargon" },
+    label = "English",
+    sources = { "wn", "moby-thesaurus", "gcide", "foldoc", "jargon" },
     word_files = {
-      "/usr/share/dict/words",  -- Linux
-      "/usr/dict/words",        -- older BSD/macOS
+      "/usr/share/dict/words", -- Linux
+      "/usr/dict/words", -- older BSD/macOS
     },
   },
   pt = {
-    label      = "Português",
-    sources    = { "fd-por-eng", "fd-eng-por" },
+    label = "Português",
+    sources = { "fd-por-eng", "fd-eng-por" },
     word_files = {
       "/usr/share/dict/portuguese",
       "/usr/share/dict/pt_PT",
@@ -19,31 +19,31 @@ local LANG_DEFAULTS = {
     },
   },
   de = {
-    label      = "Deutsch",
-    sources    = { "fd-deu-eng", "fd-eng-deu" },
+    label = "Deutsch",
+    sources = { "fd-deu-eng", "fd-eng-deu" },
     word_files = { "/usr/share/dict/german", "/usr/share/dict/ngerman" },
   },
   es = {
-    label      = "Español",
-    sources    = { "fd-spa-eng", "fd-eng-spa" },
+    label = "Español",
+    sources = { "fd-spa-eng", "fd-eng-spa" },
     word_files = { "/usr/share/dict/spanish" },
   },
   fr = {
-    label      = "Français",
-    sources    = { "fd-fra-eng", "fd-eng-fra" },
+    label = "Français",
+    sources = { "fd-fra-eng", "fd-eng-fra" },
     word_files = { "/usr/share/dict/french" },
   },
 }
 
 M.config = {
-  server       = "dict.org",
-  port         = 2628,
-  timeout_ms   = 6000,       -- per-request budget (define/match/all)
+  server = "dict.org",
+  port = 2628,
+  timeout_ms = 5000, -- per-request budget (define/match/all)
   default_lang = "en",
-  languages    = LANG_DEFAULTS,
-  parallel     = false,      -- true → preview fetches all sources at once
-  suggest      = true,       -- true → MATCH ... on empty define result
-  provider     = "dict.org", -- "dict.org" (TCP) | "cli" (dict binary, works offline)
+  languages = LANG_DEFAULTS,
+  parallel = false, -- true → preview fetches all sources at once
+  suggest = true, -- true → MATCH ... on empty define result
+  provider = "dict.org", -- "dict.org" (TCP) | "cli" (dict binary, works offline)
 }
 
 -- Per-language cursor into cfg.sources so switching languages does not
@@ -84,13 +84,14 @@ function M.setup(opts)
   -- Any old cached results were built with previous settings (provider,
   -- server). Wipe so setup() reliably applies.
   local ok, cache = pcall(require, "lexicon.cache")
-  if ok then cache.clear() end
+  if ok then
+    cache.clear()
+  end
 end
 
 --- Return language config table for lang_key (falls back to default_lang).
 function M.lang_cfg(lang_key)
-  return M.config.languages[lang_key or M.config.default_lang]
-      or M.config.languages[M.config.default_lang]
+  return M.config.languages[lang_key or M.config.default_lang] or M.config.languages[M.config.default_lang]
 end
 
 --- Current active dict.org source for lang_key.
@@ -140,9 +141,10 @@ end
 local function provider()
   if M.config.provider == "cli" then
     local cli = require("lexicon.cli")
-    if cli.available() then return cli end
-    vim.notify("lexicon: config.provider='cli' but `dict` not found; falling back to network",
-      vim.log.levels.WARN)
+    if cli.available() then
+      return cli
+    end
+    vim.notify("lexicon: config.provider='cli' but `dict` not found; falling back to network", vim.log.levels.WARN)
   end
   return require("lexicon.protocol")
 end
@@ -154,20 +156,14 @@ end
 -- cache the result.
 -- @return { cancel = fun() }
 function M.fetch(word, database, on_lines)
-  return provider().define(
-    M.config.server, M.config.port,
-    database, word, M.config.timeout_ms, on_lines
-  )
+  return provider().define(M.config.server, M.config.port, database, word, M.config.timeout_ms, on_lines)
 end
 
 --- Async MATCH — fuzzy-list candidate words in a database.
 -- Callback: on_matches(words: string[], ok: boolean).
 -- @return { cancel = fun() }
 function M.match(word, database, on_matches)
-  return provider().match(
-    M.config.server, M.config.port,
-    database, word, M.config.timeout_ms, on_matches
-  )
+  return provider().match(M.config.server, M.config.port, database, word, M.config.timeout_ms, on_matches)
 end
 
 --- Fetch a word from every source configured for lang_key concurrently.
@@ -176,28 +172,38 @@ end
 -- render a "no definition" marker for each source.
 -- @return { cancel = fun() }
 function M.fetch_all(word, lang_key, on_result)
-  local cfg      = M.lang_cfg(lang_key)
-  local sources  = cfg.sources
-  local results  = {}
-  local pending  = #sources
-  local handles  = {}
+  local cfg = M.lang_cfg(lang_key)
+  local sources = cfg.sources
+  local results = {}
+  local pending = #sources
+  local handles = {}
   local canceled = false
-  local all_ok   = true
+  local all_ok = true
 
   for i, src in ipairs(sources) do
     handles[i] = M.fetch(word, src, function(lines, ok)
-      if canceled then return end
+      if canceled then
+        return
+      end
       results[i] = { src = src, lines = lines, ok = ok }
-      if not ok then all_ok = false end
+      if not ok then
+        all_ok = false
+      end
       pending = pending - 1
-      if pending == 0 then on_result(results, all_ok) end
+      if pending == 0 then
+        on_result(results, all_ok)
+      end
     end)
   end
 
   return {
     cancel = function()
       canceled = true
-      for _, h in ipairs(handles) do pcall(function() h.cancel() end) end
+      for _, h in ipairs(handles) do
+        pcall(function()
+          h.cancel()
+        end)
+      end
     end,
   }
 end
