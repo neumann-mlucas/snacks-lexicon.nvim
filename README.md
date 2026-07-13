@@ -101,14 +101,14 @@ Windows users should stay on the default `provider = "dict.org"`.
   "neumann-mlucas/snacks-lexicon.nvim",
   lazy = true,
   keys = {
-    { "<leader>ww", function() require("lexicon.picker").open() end,                                    desc = "Lexicon (default lang)" },
-    { "<leader>we", function() require("lexicon.picker").en() end,                                      desc = "Dict: English" },
+    { "<leader>ww", function() require("lexicon.picker").open() end, desc = "Lexicon (default lang)" },
+    { "<leader>we", function() require("lexicon.picker").en() end, desc = "Dict: English" },
     { "<leader>wt", function() require("lexicon.picker").en({ default_source = "moby-thesaurus" }) end, desc = "Dict: Thesaurus" },
-    { "<leader>wp", function() require("lexicon.picker").pt() end,                                      desc = "Dict: Português" },
-    { "<leader>wd", function() require("lexicon.picker").de() end,                                      desc = "Dict: Deutsch" },
+    { "<leader>wp", function() require("lexicon.picker").pt() end, desc = "Dict: Português" },
+    { "<leader>wd", function() require("lexicon.picker").de() end, desc = "Dict: Deutsch" },
   },
   opts = {
-    provider     = "dict.org",  -- or "cli" (uses the `dict` binary; works offline)
+    provider     = "dict.org",  -- or "cli"
     server       = "dict.org",
     port         = 2628,
     timeout_ms   = 6000,        -- per-request budget in milliseconds
@@ -124,13 +124,13 @@ Windows users should stay on the default `provider = "dict.org"`.
 
 ## Keybindings
 
-| Key     | Action                                      |
-| ------- | ------------------------------------------- |
-| `<C-n>` | Cycle to next dictionary source             |
-| `<C-p>` | Cycle to previous dictionary source         |
-| `<C-a>` | Toggle parallel (all-sources) preview       |
-| `<CR>`  | Insert selected word at cursor position     |
-| `<Esc>` | Close picker                                |
+| Key     | Action                                  |
+| ------- | --------------------------------------- |
+| `<C-n>` | Cycle to next dictionary source         |
+| `<C-p>` | Cycle to previous dictionary source     |
+| `<C-a>` | Toggle parallel (all-sources) preview   |
+| `<CR>`  | Insert selected word at cursor position |
+| `<Esc>` | Close picker                            |
 
 Source cycle order (English): `wn → moby-thesaurus → gcide → foldoc → jargon → …`
 
@@ -152,95 +152,6 @@ Two backends are supported via `opts.provider`:
 
 - `"dict.org"` (default): native `vim.uv` TCP client to a DICT server. Requires network.
 - `"cli"`: shells out to the `dict` binary. Works offline against a local `dictd` server, or online via `/etc/dict.conf`. Falls back to the network provider if `dict` is not on `PATH`.
-
-### Local dictd — near-instant lookups
-
-Running your own `dictd` server locally makes every lookup a loopback call.
-Response time drops from ~1–2s (dict.org round trip) to a few milliseconds.
-
-The `dict` CLI reads `/etc/dict/dict.conf` (or `~/.dictrc`) and tries each
-server in the listed order, falling back to the next one on connection
-failure. On most distros the default file lists `localhost` first, so once
-`dictd` is running locally, `provider = "cli"` transparently uses it —
-**no plugin config needed**.
-
-**Debian / Ubuntu** — the easiest path, databases are packaged:
-
-```
-sudo apt install dictd dict-wn dict-gcide dict-moby-thesaurus dict-foldoc dict-jargon
-# dictd starts automatically; databases live in /usr/share/dictd/
-```
-
-**Arch Linux** — only `dictd` (server + client) is packaged. **There are no
-`dict-*` database packages** in the official repos or AUR. Get databases
-from FreeDict, from Debian `.deb` files, or build your own with `dictfmt`.
-
-```
-sudo pacman -S dictd
-sudo systemctl enable --now dictd
-
-# Option 1 — FreeDict bilingual dictionaries
-# https://freedict.org/downloads/  (grab *-dictd.tar.xz for each pair)
-# Extract .dict.dz + .index into /usr/share/dictd/
-
-# Option 2 — reuse Debian DB packages (no runtime deps)
-mkdir /tmp/dict && cd /tmp/dict
-wget http://ftp.debian.org/debian/pool/main/d/dict-wn/dict-wn_3.0-38_all.deb
-ar x dict-wn_3.0-38_all.deb && tar xf data.tar.xz
-sudo cp usr/share/dictd/*.{index,dict.dz} /usr/share/dictd/
-sudo dictdconfig -w                          # regenerate /etc/dictd/dictd.conf
-sudo systemctl restart dictd
-```
-
-**Fedora**
-
-```
-sudo dnf install dictd dictd-server dict-wn dict-gcide
-sudo systemctl enable --now dictd
-```
-
-**macOS (Homebrew)** — `dictd` is packaged, DBs are not; use FreeDict.
-
-```
-brew install dictd
-brew services start dictd
-```
-
-**Verify:**
-
-```
-dict -h localhost -d gcide definition
-```
-
-**Point the plugin at CLI mode.** No `server` override needed — `dict`
-already knows to try localhost first:
-
-```lua
-require("lexicon").setup({
-  provider   = "cli",
-  timeout_ms = 1500,   -- local is single-digit-millisecond
-})
-```
-
-### Building custom DBs from Aspell / Hunspell
-
-Since Arch (and macOS) ship only Aspell / Hunspell dictionaries, you can
-convert them into dictd databases with `dictfmt`:
-
-```
-# Aspell → plain word list → dictd DB
-aspell -d pt dump master | aspell -l pt expand > /tmp/pt.words
-dictfmt --allchars --utf8 --headword-separator ':' \
-  -s "Portuguese Word List" pt-words < /tmp/pt.words
-
-# Now pt-words.dict + pt-words.index exist. Install them:
-sudo mv pt-words.dict pt-words.index /usr/share/dictd/
-sudo dictdconfig -w
-sudo systemctl restart dictd
-```
-
-The resulting DB has words only (no definitions), useful as a spell-check
-source. For real bilingual definitions, FreeDict is the shortest path.
 
 ## Configuration
 
