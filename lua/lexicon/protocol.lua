@@ -108,8 +108,11 @@ local function run_request(server, port, database, word, timeout_ms, on_result, 
     cleanup()
   end
 
+  -- On timeout, still parse whatever arrived. If we saw any status code
+  -- from the server, ok=true and we surface partial results; if buf is
+  -- empty, saw_valid_reply → false, so callers treat it as a network error.
   timer = uv.new_timer()
-  timer:start(timeout_ms, 0, function() finish(false) end)  -- timeout → not ok
+  timer:start(timeout_ms, 0, function() finish() end)
 
   uv.getaddrinfo(server, tostring(port), { socktype = "stream" }, function(err, res)
     if err or not res or not res[1] then finish(false) return end
@@ -130,7 +133,12 @@ local function run_request(server, port, database, word, timeout_ms, on_result, 
         client:read_start(function(rerr, data)
           if rerr or not data then finish() return end
           buf = buf .. data
-          if buf:find("\n221[ \r]") or buf:find("^221[ \r]") then finish() end
+          -- 221 = server bye (after QUIT); 250 = transaction complete for
+          -- DEFINE/MATCH. Whichever we see first is a valid stopping point.
+          if buf:find("\n221[ \r]") or buf:find("^221[ \r]")
+              or buf:find("\n250[ \r]") or buf:find("^250[ \r]") then
+            finish()
+          end
         end)
       end)
     end
@@ -140,12 +148,17 @@ local function run_request(server, port, database, word, timeout_ms, on_result, 
   return { cancel = cancel }
 end
 
+-- We deliberately do NOT send a CLIENT identification line before the
+-- request: pipelining CLIENT would produce an extra 250 in the response
+-- stream, which our completion detector (which stops on the first 250) would
+-- match too early. Skipping CLIENT keeps the response predictable.
+
 --- Fetch a definition via the DICT protocol.
 -- @return { cancel = fun() }
 function M.define(server, port, database, word, timeout_ms, on_lines)
   return run_request(server, port, database, word, timeout_ms, on_lines,
     function(db, w)
-      return ("CLIENT nvim-lexicon\r\nDEFINE %s %s\r\nQUIT\r\n"):format(db, w)
+      return ("DEFINE %s %s\r\nQUIT\r\n"):format(db, w)
     end,
     parse)
 end
@@ -156,7 +169,7 @@ end
 function M.match(server, port, database, word, timeout_ms, on_matches)
   return run_request(server, port, database, word, timeout_ms, on_matches,
     function(db, w)
-      return ("CLIENT nvim-lexicon\r\nMATCH %s . %s\r\nQUIT\r\n"):format(db, w)
+      return ("MATCH %s . %s\r\nQUIT\r\n"):format(db, w)
     end,
     parse_matches)
 end
