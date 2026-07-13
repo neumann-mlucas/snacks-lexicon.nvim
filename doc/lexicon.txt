@@ -127,11 +127,6 @@ Local dictd for near-instant lookups~
         # add a `database <name> { data ...; index ...; }` block per DB.
         sudo pacman -S dictd
         sudo systemctl enable --now dictd
-
-        # Arch caveat: /etc/default/dictd defaults to `--locale en_US.UTF-8`
-        # which fails on stock installs (locale not generated). Change it
-        # to `C.utf8` or run `sudo locale-gen` after uncommenting en_US.UTF-8
-        # in /etc/locale.gen.
 <
     Then set: >lua
 
