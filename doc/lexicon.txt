@@ -120,11 +120,18 @@ Local dictd for near-instant lookups~
         # Debian / Ubuntu — DBs are packaged
         sudo apt install dictd dict-wn dict-gcide dict-moby-thesaurus
 
-        # Arch — only `dictd` is packaged. Get DBs from FreeDict
+        # Arch — only `dictd` is packaged. Grab DB files from FreeDict
         # (https://freedict.org/downloads/) or extract them from the
-        # Debian dict-* .deb files; then dictdconfig -w && restart dictd.
+        # Debian dict-* .deb archives into /usr/share/dictd/. Then edit
+        # /etc/dict/dictd.conf by hand (dictdconfig is Debian-only) to
+        # add a `database <name> { data ...; index ...; }` block per DB.
         sudo pacman -S dictd
         sudo systemctl enable --now dictd
+
+        # Arch caveat: /etc/default/dictd defaults to `--locale en_US.UTF-8`
+        # which fails on stock installs (locale not generated). Change it
+        # to `C.utf8` or run `sudo locale-gen` after uncommenting en_US.UTF-8
+        # in /etc/locale.gen.
 <
     Then set: >lua
 
@@ -134,8 +141,15 @@ Local dictd for near-instant lookups~
         })
 <
     Custom databases: convert a word list with `dictfmt(1)`, drop the
-    .dict.dz + .index into /usr/share/dictd/, run `dictdconfig -w` to
-    regenerate the config, restart dictd.
+    .dict.dz + .index into /usr/share/dictd/, add a `database` block to
+    /etc/dict/dictd.conf (or run `dictdconfig -w` on Debian), restart
+    dictd.
+
+Database name convention~
+    dict.org exposes FreeDict pairs as `fd-<src>-<dst>` (e.g. `fd-eng-por`).
+    A local dictd that installed FreeDict tarballs directly uses plain
+    `<src>-<dst>` (e.g. `eng-por`). Update `sources` per language when
+    you switch provider.
 
 Language profiles~
 

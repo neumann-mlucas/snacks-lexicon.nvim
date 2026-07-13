@@ -157,12 +157,19 @@ Two backends are supported via `opts.provider`:
 
 ```lua
 require("lexicon").setup({
-  server     = "dict.org",  -- any DICT-compatible server
-  port       = 2628,
-  timeout_ms = 3000,
+  provider     = "dict.org",  -- "dict.org" (TCP) or "cli" (local dict binary)
+  server       = "dict.org",  -- DICT server hostname (network provider only)
+  port         = 2628,
+  timeout_ms   = 6000,        -- per-request budget (bump to 1500 for local dictd)
   default_lang = "en",
+  parallel     = false,       -- true → preview fetches all sources at once
+  suggest      = true,        -- MATCH fallback on empty results
 
-  -- Override or extend any language profile
+  -- Override or extend any language profile.
+  -- NOTE on database names: they differ between providers.
+  --   • dict.org             → `fd-por-eng`, `fd-eng-por`, `fd-deu-eng` (Debian convention, `fd-` prefix)
+  --   • local dictd via freedict tarballs → `por-eng`, `eng-por`, `deu-eng` (no prefix)
+  -- Adjust `sources` to match whichever backend you use.
   languages = {
     en = {
       label      = "English",
@@ -217,20 +224,24 @@ require("lexicon.picker").en({ default_source = "moby-thesaurus" })
 ## Architecture
 
 ```
-plugin/lexicon.lua   :Lexicon user command with completion
+plugin/lexicon.lua   :Lexicon, :LexiconDefine, :LexiconCacheClear commands
 lua/lexicon/
 ├── protocol.lua     DICT protocol client over raw TCP (vim.uv)
-├── init.lua         Config, language profiles, source cycle state, fetch()
+├── cli.lua          `dict` binary spawn client (offline provider)
+├── init.lua         Config, language profiles, per-lang source state, fetch/match/fetch_all
 ├── cache.lua        Bounded LRU cache for fetched definitions
+├── define.lua       :LexiconDefine floating window
 ├── health.lua       :checkhealth lexicon
 └── picker.lua       snacks.picker integration: word list, preview, keymaps
 ```
 
-**`protocol.lua`** — resolves hostname via `uv.getaddrinfo`, opens a TCP connection, sends `DEFINE <database> <word>`, parses RFC 2229 response codes, calls `on_lines` on the vim main thread.
+**`protocol.lua`** — resolves hostname via `uv.getaddrinfo`, opens a TCP connection, sends `DEFINE <database> <word>`, parses RFC 2229 response codes, calls `on_lines(lines, ok)` on the vim main thread. Returns `{ cancel = fn }` so in-flight requests can be aborted.
 
-**`init.lua`** — holds the merged config and `_state.source_idx`. `M.fetch(word, db, cb)` delegates to `protocol.define`. `M.cycle_source()` advances the index mod len.
+**`cli.lua`** — same `define/match` interface but shells out to the `dict` binary via `uv.spawn`. Selected via `config.provider = "cli"`. `dict` reads `/etc/dict/dict.conf` for its own server list, so local dictd is used automatically when configured.
 
-**`picker.lua`** — reads the word list file into `items[]`, passes them to `Snacks.picker.pick`. The `preview` function fires for each selected word and starts an async fetch; the result is written into the captured preview buffer. `<C-n>` calls `cycle_source` then re-fetches for the current item.
+**`init.lua`** — holds merged config, per-language source cursor in `_state.source_idx_by_lang`, and dispatches `M.fetch/M.match/M.fetch_all` to either provider. `M.cycle_source` / `M.cycle_source_prev` / `M.set_source` mutate the cursor.
+
+**`picker.lua`** — reads the word list file into `items[]` (cached per path), passes them to `Snacks.picker.pick`. `preview` debounces then fetches asynchronously; a generation counter drops stale callbacks and `cache.set` is skipped when `ok=false`. `<C-n>`/`<C-p>` cycle sources; `<C-a>` toggles parallel-all mode.
 
 ## dict.org Sources
 
@@ -250,4 +261,4 @@ Common sources available on dict.org:
 | `fd-por-eng`     | Português → English            |
 | `fd-deu-eng`     | Deutsch → English              |
 
-Full list: `telnet dict.org 2628` then `SHOW DB`.
+Full list: `dict -h dict.org -D` (or `telnet dict.org 2628` then `SHOW DB`).

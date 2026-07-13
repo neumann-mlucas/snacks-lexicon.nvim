@@ -65,17 +65,22 @@ function M.check()
   end
 
   vim.health.start("snacks-lexicon: server")
-  local host = lex.config.server
-  local ok, err = dns_ok(host, 2000)
-  if ok then
-    vim.health.ok(("DNS resolves %s"):format(host))
+  if lex.config.provider == "cli" then
+    vim.health.info("provider = 'cli' — dict.org DNS not required")
+    vim.health.info("dict(1) uses its own /etc/dict/dict.conf server list")
   else
-    vim.health.error(("Cannot resolve %s"):format(host), {
-      err and tostring(err) or "getaddrinfo returned no addresses",
-      "Check network connectivity and the `server` config option",
-    })
+    local host = lex.config.server
+    local ok, err = dns_ok(host, 2000)
+    if ok then
+      vim.health.ok(("DNS resolves %s"):format(host))
+    else
+      vim.health.error(("Cannot resolve %s"):format(host), {
+        err and tostring(err) or "getaddrinfo returned no addresses",
+        "Check network connectivity and the `server` config option",
+      })
+    end
+    vim.health.info(("Port: %d, timeout: %dms"):format(lex.config.port, lex.config.timeout_ms))
   end
-  vim.health.info(("Port: %d, timeout: %dms"):format(lex.config.port, lex.config.timeout_ms))
 end
 
 return M
