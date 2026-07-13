@@ -221,17 +221,17 @@ function M.open(lang_key, opts)
     end
   end
 
-  -- Update the picker's main title with the language + current source.
-  local function refresh_title(picker)
+  -- Update the preview window title (the source name) via the snacks title
+  -- template system so the change survives layout refreshes.
+  local function refresh_titles(picker, src)
     if not picker then return end
-    local src = lex.current_source(lang_key)
-    picker.title = ("Lexicon [%s | %s]"):format(cfg.label, src)
+    if src and picker.preview then picker.preview.title = src end
     pcall(function() picker:update_titles() end)
   end
 
   -- Render either the definition, a "no definition" placeholder, or an
   -- explicit fetch-failure message. Suggestions are appended for empty results.
-  local function render_one(preview, word, src, lines, ok, suggestions)
+  local function render_one(preview, picker, word, src, lines, ok, suggestions)
     if not ok then
       write_lines(preview, {
         "",
@@ -252,13 +252,13 @@ function M.open(lang_key, opts)
     else
       write_lines(preview, pretty(lines, word, src))
     end
-    if preview and preview.win then set_title(preview.win, src) end
+    refresh_titles(picker, src)
     apply_highlights(preview)
   end
 
-  local function render_all(preview, word, results)
+  local function render_all(preview, picker, word, results)
     write_lines(preview, pretty_all(results, word))
-    if preview and preview.win then set_title(preview.win, "all sources") end
+    refresh_titles(picker, "all sources")
     apply_highlights(preview)
   end
 
@@ -269,9 +269,8 @@ function M.open(lang_key, opts)
     cancel_timer()
     cancel_fetch()
 
-    refresh_title(picker)
     local src = lex.current_source(lang_key)
-    if preview and preview.win then set_title(preview.win, src) end
+    refresh_titles(picker, src)
 
     -- Parallel mode: fetch every source at once, cache each individually.
     if lex.config.parallel then
@@ -288,7 +287,7 @@ function M.open(lang_key, opts)
         end
       end
       if not missing and #cached_all == #cfg.sources then
-        render_all(preview, word, cached_all)
+        render_all(preview, picker, word, cached_all)
         return
       end
 
@@ -303,7 +302,7 @@ function M.open(lang_key, opts)
           for _, r in ipairs(results) do
             if r.ok then cache.set(word, r.src, r.lines) end
           end
-          render_all(preview, word, results)
+          render_all(preview, picker, word, results)
         end)
       end))
       return
@@ -312,7 +311,7 @@ function M.open(lang_key, opts)
     -- Single-source: cache hit renders immediately.
     local hit = cache.get(word, src)
     if hit then
-      render_one(preview, word, src, hit, true, nil)
+      render_one(preview, picker, word, src, hit, true, nil)
       return
     end
 
@@ -332,10 +331,10 @@ function M.open(lang_key, opts)
           state.fetch = lex.match(word, src, function(matches, _mok)
             state.fetch = nil
             if state.gen ~= my_gen then return end
-            render_one(preview, word, src, lines, ok, matches)
+            render_one(preview, picker, word, src, lines, ok, matches)
           end)
         else
-          render_one(preview, word, src, lines, ok, nil)
+          render_one(preview, picker, word, src, lines, ok, nil)
         end
       end)
     end))
@@ -351,25 +350,41 @@ function M.open(lang_key, opts)
 
   pick(vim.tbl_extend("force", {
     source  = "lexicon_" .. lang_key,
-    title   = ("Lexicon [%s | %s]"):format(cfg.label, lex.current_source(lang_key)),
+    -- `title` is snacks' picker.title, which we don't render anywhere
+    -- (each box has its own explicit title below) but keep sensible for
+    -- users inspecting `Snacks.picker.get()`.
+    title   = "Lexicon",
     pattern = seed_pattern(),
     format  = "text",
     items   = items,
 
+    -- Three-title layout:
+    --   • Outer horizontal box   → "Lexicon" (static, plugin identity)
+    --   • Inner vertical box     → language label, e.g. " English " (static)
+    --   • Preview window          → dict source, e.g. " gcide " (updated on cycle)
     layout = {
       layout = {
-        box    = "horizontal",
-        width  = 0.92,
-        height = 0.88,
-        border = "rounded",
+        box       = "horizontal",
+        width     = 0.92,
+        height    = 0.88,
+        border    = "rounded",
+        title     = " Lexicon ",
+        title_pos = "center",
         {
-          box    = "vertical",
-          border = true,
-          title  = "{title} {live} {flags}",
+          box       = "vertical",
+          border    = true,
+          title     = (" %s "):format(cfg.label),
+          title_pos = "center",
           { win = "input", height = 1, border = "bottom" },
           { win = "list",  border = "none" },
         },
-        { win = "preview", title = "{preview}", border = true, width = 0.72 },
+        {
+          win       = "preview",
+          border    = true,
+          title     = "{preview}",
+          title_pos = "center",
+          width     = 0.72,
+        },
       },
     },
 
