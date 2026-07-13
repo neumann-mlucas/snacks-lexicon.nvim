@@ -8,7 +8,9 @@ Dictionary and thesaurus lookup via [dict.org](https://dict.org) DICT protocol, 
 - Live definition preview fetched asynchronously from dict.org
 - Cycle through multiple dictionary sources (`wn`, `moby-thesaurus`, `gcide`, …)
 - Multi-language support (English, Português, Deutsch, Español, Français)
-- No shell dependencies — uses `vim.uv` TCP directly
+- Two backends: `dict.org` over TCP (default, zero deps) or the `dict` CLI (offline)
+- No shell dependencies for the default backend — uses `vim.uv` TCP directly
+- Portable: works on Linux, macOS, and Windows (some backends are POSIX-only)
 
 ## Requirements
 
@@ -17,14 +19,79 @@ Dictionary and thesaurus lookup via [dict.org](https://dict.org) DICT protocol, 
 - System word list (e.g. `/usr/share/dict/words`) for the word finder
 - Internet access to dict.org
 
-On Windows there is no default word list path; download one (e.g. SCOWL,
-`words.txt` from wordnik/wordlist) and point `word_files` at it via config:
+## Word lists
+
+The plugin fuzzy-searches over a plain-text word list, one word per line.
+For English on Linux/macOS you already have `/usr/share/dict/words`. For
+other languages you need to install or generate one.
+
+### Install from your package manager
+
+```
+# Debian / Ubuntu
+sudo apt install wamerican-large wportuguese ngerman wspanish wfrench witalian
+
+# Arch
+sudo pacman -S words                     # English
+# Portuguese / German / etc: use aspell dicts (see below) or AUR
+
+# Fedora
+sudo dnf install words
+
+# macOS (via Homebrew)
+brew install aspell   # provides multi-language dictionaries
+```
+
+The Debian packages install into `/usr/share/dict/*`; the defaults in
+`languages.<lang>.word_files` already look there.
+
+### Generate from Aspell or Hunspell
+
+If your OS has no packaged word list for the language you want:
+
+```
+# Aspell (works on Linux, macOS, Windows via MSYS2)
+aspell -d pt   dump master | aspell -l pt   expand > ~/dict/portuguese.txt
+aspell -d de   dump master | aspell -l de   expand > ~/dict/german.txt
+aspell -d ja   dump master | aspell -l ja   expand > ~/dict/japanese.txt
+
+# Hunspell alternative (one form per line)
+unmunch /usr/share/hunspell/pt_BR.dic /usr/share/hunspell/pt_BR.aff \
+  > ~/dict/portuguese.txt
+```
+
+Then point the config at the file you generated:
+
+```lua
+opts = {
+  languages = {
+    pt = { word_files = { "~/dict/portuguese.txt", "/usr/share/dict/portuguese" } },
+    ja = {
+      label      = "日本語",
+      sources    = { "fd-jpn-eng" },
+      word_files = { "~/dict/japanese.txt" },
+    },
+  },
+}
+```
+
+Paths are checked in order; first readable one wins. `~` is expanded.
+
+### Windows
+
+There is no default word list path on Windows. Grab a wordlist (e.g.
+[SCOWL](http://wordlist.aspell.net/), Wordnik's public list, or
+[dwyl/english-words](https://github.com/dwyl/english-words)) and point
+`word_files` at it:
 
 ```lua
 opts = {
   languages = { en = { word_files = { "C:/tools/dict/words.txt" } } },
 }
 ```
+
+The `provider = "cli"` mode requires the `dict` binary, which is POSIX-only;
+Windows users should stay on the default `provider = "dict.org"`.
 
 ## Installation
 

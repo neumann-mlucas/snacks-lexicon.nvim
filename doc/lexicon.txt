@@ -189,6 +189,16 @@ Nothing happens on <leader>we                                   ~
     Install a system dictionary package (`words`, `wamerican`, etc.) or
     override `languages.<lang>.word_files` with a real path.
 
+    Generate a word list from Aspell for languages without a packaged file:
+        aspell -d pt dump master | aspell -l pt expand > ~/dict/portuguese.txt
+
+    Then set `languages.pt.word_files = { "~/dict/portuguese.txt" }`.
+    Paths support `~` expansion; the first readable entry wins.
+
+    Windows has no default path; download SCOWL / dwyl/english-words
+    and point `word_files` at it. `provider = "cli"` is POSIX-only —
+    Windows should stay on the default network provider.
+
 Preview always says "fetching…"                                 ~
     Server timeout. Check `:checkhealth lexicon`, raise `timeout_ms`, or
     point `server` at a mirror.
